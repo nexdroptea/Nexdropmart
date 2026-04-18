@@ -216,7 +216,8 @@ async function sbLoadProducts() {
                 extraImages: p.extra_images || [],
                 category: p.category || '',
                 rating: p.rating || 4.5,
-                ratingCount: p.rating_count || 0
+                ratingCount: p.rating_count || 0,
+                priceUnit: p.price_unit || ''
             }));
             console.log('✅ ' + products.length + ' products Supabase se load hue!');
         }
@@ -246,7 +247,8 @@ async function sbSaveProduct(p) {
             cod_allowed: p.codAllowed !== false,
             courier_charge: p.courierCharge || 0,
             highlights: p.highlights || [],
-            extra_images: p.extraImages || []
+            extra_images: p.extraImages || [],
+            price_unit: p.priceUnit || ''
         };
         if(row.image_value && row.image_value.length > 500000) {
             row.image_value = '🌾'; row.image_type = 'emoji';
@@ -294,6 +296,7 @@ async function sbLoadOrders() {
                 paymentMethod: o.payment_method || '',
                 orderType: o.order_type || 'retail',
                 stockDeducted: o.stock_deducted || false,
+                adminNote: o.admin_note || '',
                 date: o.created_at
             }));
         }
@@ -319,7 +322,8 @@ async function sbSaveOrder(order) {
             bill_number: order.billNumber || '',
             payment_method: order.paymentMethod || '',
             order_type: order.orderType || 'retail',
-            stock_deducted: order.stockDeducted || false
+            stock_deducted: order.stockDeducted || false,
+            admin_note: order.adminNote || ''
         };
         if(order.id) {
             await db.from('orders').update(row).eq('id', order.id);
@@ -4457,8 +4461,10 @@ function saveAllB2B() {
 function saveSettingsData() { localStorage.setItem('nexdrop_settings', JSON.stringify(settings)); updateMakhanaImages(); }
 function updateStats() {
     // Stock stats
-    let lowStockCount = products.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10 && p.stockQty > 0).length;
-    let outStockCount = products.filter(p => p.stockQty === 0).length;
+    let lowStockCount = products.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10 && p.stockQty > 0).length
+        + b2bProducts.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10 && p.stockQty > 0).length;
+    let outStockCount = products.filter(p => p.stockQty === 0).length
+        + b2bProducts.filter(p => p.stockQty === 0).length;
     // Total stock = sum of all retail products + b2b products
     let retailStock = products.reduce((s,p) => s + (p.stockQty || 0), 0);
     let b2bStock = b2bProducts.reduce((s,p) => s + (p.stockQty || 0), 0);
@@ -6139,7 +6145,7 @@ function uploadAdminPhoto(id, input) {
     };
     reader.readAsDataURL(file);
 }
-function toggleStock(id) { let p=products.find(p=>p.id===id); if(p){p.inStock=!p.inStock; saveProducts(); loadAdminProducts(); displayProducts(); } }
+function toggleStock(id) { let p=products.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveProducts(); loadAdminProducts(); displayProducts(); } }
 function toggleCOD(id) { 
     let p=products.find(p=>p.id===id); 
     if(p){ 
@@ -6169,7 +6175,7 @@ function addB2BProduct() {
         minQty: document.getElementById('newB2BMin').value || 'Contact',
         stockQty: isNaN(b2bSq) ? null : b2bSq,
         discount: isNaN(b2bDisc) ? 0 : b2bDisc,
-        inStock: true,
+        inStock: isNaN(b2bSq) ? true : b2bSq > 0,
         hsnCode: document.getElementById('newB2BHsn')?.value?.trim() || '1108',
         gstSlab: isNaN(b2bGst) ? 5 : b2bGst,
         imageType: 'emoji',
@@ -6226,6 +6232,8 @@ function saveAllProducts() {
         if(gst !== undefined && gst !== '') p.gstSlab = parseFloat(gst) || 5;
         let hl = document.getElementById(`highlights_${p.id}`)?.value;
         if(hl !== undefined) p.highlights = hl.split('\n').map(h=>h.trim()).filter(h=>h.length>0);
+        let pu = document.getElementById(`priceunit_${p.id}`)?.value;
+        if(pu !== undefined) p.priceUnit = pu;
     }
     saveProducts();
     loadAdminProducts();
@@ -6372,7 +6380,7 @@ function uploadB2BPhoto(id, input) {
     reader.readAsDataURL(file);
 }
 function deleteB2B(id) { if(confirm('Delete?')) { b2bProducts=b2bProducts.filter(p=>p.id!==id); saveB2B(); loadAdminB2B(); displayB2B(); } }
-function toggleB2BStock(id) { let p=b2bProducts.find(p=>p.id===id); if(p){p.inStock=!p.inStock; saveB2B(); loadAdminB2B(); displayB2B(); } }
+function toggleB2BStock(id) { let p=b2bProducts.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveB2B(); loadAdminB2B(); displayB2B(); } }
 function loadAdminOrders() {
     let filterStatus = document.getElementById('orderStatusFilter')?.value || '';
     let dateFrom = document.getElementById('orderDateFrom')?.value || '';
@@ -7412,9 +7420,7 @@ function updateCategoryTotalsLive() {
 }
 
 function loadStockManager() {
-    // Reload fresh data
-    let p2 = localStorage.getItem('nexdrop_products'); if(p2) try{ products=JSON.parse(p2); }catch(e){}
-    let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) try{ b2bProducts=JSON.parse(b2); }catch(e){}
+    // Use in-memory data (already synced from Supabase on load)
 
     let rtea=[], wtea=[], rmak=[], wmak=[];
     products.forEach(p => {
@@ -8214,9 +8220,7 @@ function clearReportFilter() {
 function refreshStockDashboard() {
     let el = document.getElementById('stockDashboardGrid');
     if(!el) return;
-    // Reload fresh data
-    let p2 = localStorage.getItem('nexdrop_products'); if(p2) products = JSON.parse(p2);
-    let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts = JSON.parse(b2);
+    // Use in-memory data (already synced from Supabase on load)
     let allItems = [
         ...products.map(p => ({name: p.name, qty: p.stockQty||0, type:'retail', id:p.id})),
         ...b2bProducts.map(p => ({name: p.name, qty: p.stockQty||0, type:'b2b', id:p.id}))
@@ -8459,7 +8463,7 @@ function importMergeData() {
         if(d.orders && Array.isArray(d.orders)) { d.orders.forEach(no => { if(!orders.find(o => o.id === no.id)) orders.push(no); }); saveOrders(); }
         if(d.users && Array.isArray(d.users)) { d.users.forEach(nu => { if(!users.find(u => u.email === nu.email)) users.push(nu); }); saveUsers(); }
         if(d.bills && Array.isArray(d.bills)) { let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl); d.bills.forEach(nb => { if(!bills.find(b => b.orderId === nb.orderId)) bills.push(nb); }); safeSave('nexdrop_bills', bills); }
-        if(d.bulkEnquiries && Array.isArray(d.bulkEnquiries)) { d.bulkEnquiries.forEach(ne => { if(!bulkEnquiries.find(e => e.timestamp === ne.timestamp)) bulkEnquiries.push(ne); }); saveBulk(); }
+        if(d.bulkEnquiries && Array.isArray(d.bulkEnquiries)) { d.bulkEnquiries.forEach(ne => { if(!bulkEnquiries.find(e => e.id === ne.id)) bulkEnquiries.push(ne); }); saveBulk(); }
         updateStats(); loadAdminOrders(); loadAdminUsers();
         if(msgEl) { msgEl.style.display='block'; msgEl.style.background='#e8f5e9'; msgEl.style.color='#2c5a4a'; msgEl.innerHTML='✅ Data merge ho gaya! Duplicates skip kiye.'; }
         showToast('✅ Data merged successfully!', '#2c5a4a');
@@ -10479,7 +10483,7 @@ function applyCoupon() {
     if(coupon.expiry && new Date(coupon.expiry) < new Date()) { showToast('⏰ This coupon has expired!', '#ff9800'); return; }
     if(coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) { showToast('❌ This coupon has reached its usage limit!', '#ff9800'); return; }
     // Check min order
-    let subtotal = cart.reduce((s,i) => { let p=products.find(p=>p.id===i.id)||b2bProducts.find(p=>p.id===i.id); let price=p?Math.round(p.price-(p.price*(p.discount||0)/100)):0; return s+(price*i.qty); }, 0);
+    let subtotal = cart.reduce((s,i) => s + (i.price * i.quantity), 0);
     if(coupon.minOrder > 0 && subtotal < coupon.minOrder) {
         showToast('⚠️ Minimum order ₹' + coupon.minOrder + ' required for this coupon!', '#ff9800'); return;
     }
@@ -10493,7 +10497,7 @@ function applyCoupon() {
     if(inputRow) inputRow.style.display = 'none';
     if(nameEl) nameEl.textContent = coupon.code;
     if(savEl) savEl.textContent = savings;
-    updateCart();
+    renderCart();
     showToast('🎉 Coupon "' + coupon.code + '" applied successfully!', '#c2185b');
 }
 function removeCoupon() {
@@ -11254,7 +11258,7 @@ async function sbDistUpdatePassword(id, newHash) {
 
 async function sbDistGetOrders(email) {
     try {
-        const { data, error } = await db.from('orders').select('*').eq('email', email).order('id', { ascending: false });
+        const { data, error } = await db.from('orders').select('*').eq('user_email', email).order('id', { ascending: false });
         if (error) throw error;
         return data || [];
     } catch(e) { return []; }
@@ -11444,9 +11448,18 @@ async function distChangePassword() {
     if (saved) {
         try {
             const s = JSON.parse(saved);
-            // Silently reload full distributor data on next login click
-            console.log('Distributor session found:', s.email);
-        } catch(e) {}
+            if (s && s.email) {
+                // Supabase se full distributor data restore karo
+                sbDistGetByEmail(s.email).then(dist => {
+                    if (dist && dist.status === 'approved') {
+                        currentDistributor = dist;
+                        console.log('✅ Distributor session restored:', dist.email);
+                    } else {
+                        localStorage.removeItem('nexdrop_dist_session');
+                    }
+                }).catch(() => localStorage.removeItem('nexdrop_dist_session'));
+            }
+        } catch(e) { localStorage.removeItem('nexdrop_dist_session'); }
     }
 })();
 
