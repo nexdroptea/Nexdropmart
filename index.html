@@ -3908,7 +3908,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     </select>
     <input type="text" id="newHsnCode" placeholder="HSN Code (jaise 0902)" style="border:2px solid #7b1fa2;">
     <input type="number" id="newGstSlab" placeholder="GST % (jaise 5, 12, 18)" min="0" max="28" step="0.1" style="border:2px solid #7b1fa2;">
-    <input type="text" id="newDesc" placeholder="Description" style="grid-column:1/-1;">
+    <textarea id="newDesc" placeholder="Description (detail mein likhein)" rows="3" style="grid-column:1/-1;padding:0.4rem;font-size:0.75rem;border:1px solid #ddd;border-radius:8px;font-family:inherit;resize:vertical;min-height:60px;"></textarea>
   </div>
   <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;background:#e8f5e9;border-radius:8px;padding:0.4rem 0.6rem;border:1px solid #a5d6a7;">
     <span style="font-size:0.7rem;color:#2c5a4a;white-space:nowrap;font-weight:600;">🏷️ New Category:</span>
@@ -4051,7 +4051,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <h4 style="color:#c49a6c;margin-bottom:0.8rem;">➕ Add B2B Product</h4>
   <div class="add-form-grid">
     <input type="text" id="newB2BName" placeholder="Product Name *">
-    <input type="text" id="newB2BCat" placeholder="Category">
+    <select id="newB2BCat" style="padding:0.4rem;font-size:0.75rem;border:1px solid #ddd;border-radius:8px;background:white;color:#333;"><option value="">-- B2B Category --</option></select>
     <input type="text" id="newB2BPrice" placeholder="Price (e.g. ₹120-150/kg)">
     <input type="text" id="newB2BMin" placeholder="Min Order Qty">
     <input type="number" id="newB2BStock" placeholder="📦 Stock Qty (kg/units)" min="0" style="border:2px solid #c49a6c;">
@@ -5116,15 +5116,13 @@ function updateStats() {
         let fixedKeys = ['retail_tea','wholesale_tea','retail_makhana','wholesale_makhana'];
         let fixedNames = ['Retail Tea','Wholesale Tea','Retail Makhana','Wholesale Makhana'];
 
-        // Custom categories = wo categories jo fixed 4 mein nahi hain
-        let customCats = cats.filter(c => {
-            let norm = c.toLowerCase().replace(/\s+/g,'_');
-            return !fixedKeys.includes(norm) && !fixedNames.map(n=>n.toLowerCase()).includes(c.toLowerCase());
-        });
+        // Custom categories = "Retail X" wali categories (Wholesale X skip — ek card per base cat)
+        // Fixed 4 already handled above
+        let retailCustomCats = cats.filter(c => c.toLowerCase().startsWith('retail ') &&
+            !['retail tea','retail makhana'].includes(c.toLowerCase()));
 
-        if(!customCats.length) { container.innerHTML = ''; return; }
+        if(!retailCustomCats.length) { container.innerHTML = ''; return; }
 
-        // Stock calculate karo per custom category
         const stylePool = [
             {bg:'linear-gradient(135deg,#e8eaf6,#c5cae9)',border:'#9fa8da',color:'#1a237e'},
             {bg:'linear-gradient(135deg,#fce4ec,#f8bbd9)',border:'#f48fb1',color:'#880e4f'},
@@ -5136,21 +5134,22 @@ function updateStats() {
             {bg:'linear-gradient(135deg,#e8f5e9,#c8e6c9)',border:'#a5d6a7',color:'#1b5e20'},
         ];
 
-        container.innerHTML = customCats.map((cat, i) => {
+        container.innerHTML = retailCustomCats.map((cat, i) => {
+            let baseName = cat.replace(/^Retail\s+/i,'').trim();
+            let wholeName = 'Wholesale ' + baseName;
             let stock = 0;
-            // Retail products mein check karo
             products.forEach(p => {
-                if((p.category || '').toLowerCase() === cat.toLowerCase()) stock += (p.stockQty || 0);
+                if((p.category||'').toLowerCase() === cat.toLowerCase()) stock += (p.stockQty||0);
             });
-            // B2B products mein bhi check karo
             b2bProducts.forEach(p => {
-                if((p.category || '').toLowerCase() === cat.toLowerCase()) stock += (p.stockQty || 0);
+                if((p.category||'').toLowerCase() === wholeName.toLowerCase()) stock += (p.stockQty||0);
             });
             let s = stylePool[i % stylePool.length];
             let safeKey = cat.replace(/[^a-zA-Z0-9]/g,'_');
             return `<div class="stat-card" style="background:${s.bg};border:2px solid ${s.border};cursor:pointer;min-width:120px;" onclick="filterAdminByCat('${cat}')" title="${cat} stock">
                 <div class="stat-number" id="statCustCat_${safeKey}" style="font-size:1.5rem;color:${s.color};">${stock}</div>
-                <div style="font-size:0.72rem;color:${s.color};font-weight:600;">🏷️ ${cat}</div>
+                <div style="font-size:0.72rem;color:${s.color};font-weight:600;">🏷️ ${baseName}</div>
+                <div style="font-size:0.6rem;color:${s.color};opacity:0.7;">Retail+Wholesale</div>
             </div>`;
         }).join('');
     })();
@@ -7971,9 +7970,12 @@ function displayHomeProducts() {
     } else if(homeProductFilter === "wholesale_makhana") {
         filtered = b2bProducts.filter(p => p.inStock && isMakhanaProduct(p));
     } else if(homeProductFilter && homeProductFilter.startsWith('custom:')) {
-        let customCat = homeProductFilter.slice(7).toLowerCase().trim();
-        let matchRetail = products.filter(p => p.inStock && (p.category||'').toLowerCase().trim() === customCat);
-        let matchB2B    = b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase().trim() === customCat);
+        let customCat = homeProductFilter.slice(7).trim(); // e.g. "Retail Personal Care"
+        let baseName = customCat.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
+        let retailCat = 'Retail ' + baseName;
+        let wholeCat  = 'Wholesale ' + baseName;
+        let matchRetail = products.filter(p => p.inStock && (p.category||'').toLowerCase() === retailCat.toLowerCase());
+        let matchB2B    = b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === wholeCat.toLowerCase());
         filtered = [...matchRetail, ...matchB2B];
     } else {
         filtered = products.filter(p => p.inStock);
@@ -7986,10 +7988,13 @@ function displayHomeProducts() {
     } else if(homeProductFilter === "wholesale_tea" || homeProductFilter === "wholesale_makhana") {
         filtered.forEach(p => taggedFiltered.push({type:"b2b", data:p}));
     } else if(homeProductFilter && homeProductFilter.startsWith('custom:')) {
-        let customCat = homeProductFilter.slice(7).toLowerCase().trim();
-        products.filter(p => p.inStock && (p.category||'').toLowerCase().trim() === customCat)
+        let customCat = homeProductFilter.slice(7).trim();
+        let baseName = customCat.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
+        let retailCat = 'Retail ' + baseName;
+        let wholeCat  = 'Wholesale ' + baseName;
+        products.filter(p => p.inStock && (p.category||'').toLowerCase() === retailCat.toLowerCase())
             .forEach(p => taggedFiltered.push({type:"retail", data:p}));
-        b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase().trim() === customCat)
+        b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === wholeCat.toLowerCase())
             .forEach(p => taggedFiltered.push({type:"b2b", data:p}));
     } else {
         filtered.forEach(p => taggedFiltered.push({type:"retail", data:p}));
@@ -8162,17 +8167,21 @@ function getProductCategory4(p, isB2B) {
     let cat  = (p.category || '').toLowerCase().trim();
     let catRaw = (p.category || '').trim();
 
-    // ✅ v32 FIX: Pehle check karo ki yeh ek user-defined custom category hai
-    // Custom categories = getCategories() mein saved hain aur 4 fixed buckets nahi hain
+    // Fixed 4 buckets
     let fixedCats = ['retail tea','wholesale tea','retail makhana','wholesale makhana',
         'economy grade','standard grade','premium grade','mix grade','processed'];
     let userCats = (typeof getCategories === 'function') ? getCategories() : [];
-    let isUserDefinedCat = catRaw && userCats.some(c => c.toLowerCase() === cat)
-        && !fixedCats.includes(cat);
 
-    if(isUserDefinedCat) {
-        // User-defined custom category — sirf custom card mein count hogi, 4 buckets mein nahi
-        return isB2B ? ('custom_b2b:' + catRaw) : ('custom_retail:' + catRaw);
+    // ✅ FIX: Category stored as "Retail Personal Care" / "Wholesale Personal Care"
+    // getCategories() mein same format mein stored hain ab
+    // Direct match try karo pehle
+    let isDirectMatch = catRaw && userCats.some(c => c.toLowerCase() === cat)
+        && !['retail tea','wholesale tea','retail makhana','wholesale makhana'].includes(cat);
+
+    if(isDirectMatch) {
+        // Retail prefix wali → custom_retail, Wholesale prefix wali → custom_b2b
+        if(cat.startsWith('wholesale ')) return 'custom_b2b:' + catRaw;
+        return 'custom_retail:' + catRaw;
     }
 
     // Tea detection (hardcoded keywords)
@@ -11606,22 +11615,11 @@ function updateHeroCategoryCount() {
     // 4. About section — dynamic category boxes
     let boxContainer = document.getElementById('aboutCategoryBoxes');
     if(boxContainer) {
-        const fixed4 = [
-            {name:'Retail Tea', icon:'☕'},
-            {name:'Wholesale Tea', icon:'📦'},
-            {name:'Retail Makhana', icon:'🌾'},
-            {name:'Wholesale Makhana', icon:'🎁'}
-        ];
-        let allBoxCats = [
-            ...fixed4.map(f => ({name: f.name, fixedIcon: f.icon})),
-            ...cats.map(c => ({name: c, fixedIcon: null}))
-        ];
-        boxContainer.innerHTML = allBoxCats.map((cat, i) => {
+        boxContainer.innerHTML = cats.map((cat, i) => {
             let s = _catBoxStyles[i % _catBoxStyles.length];
-            let icon = cat.fixedIcon || s.icon;
             return `<div style="background:${s.bg};border-radius:14px;padding:1rem;text-align:center;border:1px solid ${s.border};">
-                <div style="font-size:1.8rem;">${icon}</div>
-                <div style="font-weight:700;font-size:0.88rem;color:${s.nameColor};margin-top:0.3rem;">${cat.name}</div>
+                <div style="font-size:1.8rem;">${s.icon}</div>
+                <div style="font-weight:700;font-size:0.88rem;color:${s.nameColor};margin-top:0.3rem;">${cat}</div>
                 <div style="font-size:0.72rem;color:${s.descColor};margin-top:0.2rem;">Nexdrop Product Category</div>
             </div>`;
         }).join('');
@@ -11676,18 +11674,22 @@ function addCategoryTag() {
     let inp = document.getElementById('newCategoryInput');
     let val = (inp?.value || '').trim();
     if(!val) { showToast('❌ Category naam likhein!', '#ff4444'); return; }
+    // Strip "Retail"/"Wholesale" prefix agar user ne daal diya
+    let baseName = val.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
+    let retailName = 'Retail ' + baseName;
+    let wholesaleName = 'Wholesale ' + baseName;
     let cats = getCategories();
-    if(cats.find(c => c.toLowerCase() === val.toLowerCase())) {
-        showToast('⚠️ Yeh category pehle se hai!', '#ff9800'); return;
-    }
-    cats.push(val);
+    let added = [];
+    if(!cats.find(c => c.toLowerCase() === retailName.toLowerCase())) { cats.push(retailName); added.push(retailName); }
+    if(!cats.find(c => c.toLowerCase() === wholesaleName.toLowerCase())) { cats.push(wholesaleName); added.push(wholesaleName); }
+    if(added.length === 0) { showToast('⚠️ Yeh category pehle se hai!', '#ff9800'); return; }
     saveCategories(cats);
     if(inp) inp.value = '';
     loadCategoryTagsList();
-    // ✅ v31: Stock manager + dashboard refresh
+    populateCategoryDropdowns();
     if(typeof loadStockManager === 'function') loadStockManager();
     if(typeof updateStats === 'function') updateStats();
-    showToast('✅ Category "' + val + '" added!', '#2c5a4a');
+    showToast('✅ "' + retailName + '" & "' + wholesaleName + '" dono add ho gaye!', '#2c5a4a');
 }
 
 function removeCategoryTag(i) {
@@ -11706,34 +11708,58 @@ function inlineAddCategory() {
     let inp = document.getElementById('inlineCatInput');
     let val = (inp?.value || '').trim();
     if(!val) { showToast('❌ Category naam likhein!', '#ff4444'); return; }
+    // Strip prefix agar user ne daal diya
+    let baseName = val.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
+    let retailName = 'Retail ' + baseName;
+    let wholesaleName = 'Wholesale ' + baseName;
     let cats = getCategories();
-    if(cats.find(c => c.toLowerCase() === val.toLowerCase())) {
+    let added = [];
+    if(!cats.find(c => c.toLowerCase() === retailName.toLowerCase())) { cats.push(retailName); added.push(retailName); }
+    if(!cats.find(c => c.toLowerCase() === wholesaleName.toLowerCase())) { cats.push(wholesaleName); added.push(wholesaleName); }
+    if(added.length === 0) {
         showToast('⚠️ Yeh category pehle se hai!', '#ff9800');
-        // Dropdown mein auto-select karo
+        // Dropdown mein retail version auto-select karo
         let sel = document.getElementById('newCategory');
-        if(sel) { for(let o of sel.options) { if(o.value.toLowerCase() === val.toLowerCase()) { sel.value = o.value; break; } } }
+        if(sel) { for(let o of sel.options) { if(o.value.toLowerCase() === retailName.toLowerCase()) { sel.value = o.value; break; } } }
         if(inp) inp.value = '';
         return;
     }
-    cats.push(val);
     saveCategories(cats);
-    loadCategoryTagsList(); // dropdown bhi refresh hoga
-    // ✅ v31: Stock manager + dashboard refresh
+    loadCategoryTagsList();
+    populateCategoryDropdowns();
     if(typeof loadStockManager === 'function') loadStockManager();
     if(typeof updateStats === 'function') updateStats();
-    // Naye category ko auto-select karo
-    let sel = document.getElementById('newCategory');
-    if(sel) sel.value = val;
+    // Retail version auto-select karo Add Product dropdown mein
+    setTimeout(() => {
+        let sel = document.getElementById('newCategory');
+        if(sel) { for(let o of sel.options) { if(o.value === retailName) { sel.value = retailName; break; } } }
+    }, 100);
     if(inp) inp.value = '';
-    showToast('✅ Category "' + val + '" add & select ho gaya!', '#2c5a4a');
+    showToast('✅ "' + retailName + '" & "' + wholesaleName + '" dono ban gaye!', '#2c5a4a');
 }
 
 function populateCategoryDropdowns() {
     let cats = getCategories();
-    let opts = '<option value="">-- Category --</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
-    // Add product form dropdown
+    // Retail categories = jo "Retail " se start hoti hain
+    let retailCats = cats.filter(c => c.toLowerCase().startsWith('retail '));
+    // Wholesale categories = jo "Wholesale " se start hoti hain
+    let wholesaleCats = cats.filter(c => c.toLowerCase().startsWith('wholesale '));
+
+    // ── Retail dropdown ──
+    let retailOpts = '<option value="">-- Category --</option>'
+        + '<optgroup label="🛒 Retail">'
+        + retailCats.map(c => `<option value="${c}">🏷️ ${c}</option>`).join('')
+        + '</optgroup>';
     let sel = document.getElementById('newCategory');
-    if(sel) { let cur = sel.value; sel.innerHTML = opts; sel.value = cur; }
+    if(sel) { let cur = sel.value; sel.innerHTML = retailOpts; sel.value = cur; }
+
+    // ── B2B dropdown ──
+    let b2bOpts = '<option value="">-- B2B Category --</option>'
+        + '<optgroup label="🏭 Wholesale / B2B">'
+        + wholesaleCats.map(c => `<option value="${c}">🏷️ ${c}</option>`).join('')
+        + '</optgroup>';
+    let b2bSel = document.getElementById('newB2BCat');
+    if(b2bSel) { let cur = b2bSel.value; b2bSel.innerHTML = b2bOpts; b2bSel.value = cur; }
 
     // ── Custom category tabs: Admin product filter ──
     let pcatContainer = document.getElementById('pcatTabsContainer');
@@ -11743,19 +11769,20 @@ function populateCategoryDropdowns() {
         // Fixed tabs ke IDs
         let fixedIds = ['pcat_all','pcat_retail_tea','pcat_wholesale_tea','pcat_retail_makhana','pcat_wholesale_makhana','pcat_b2b'];
         // Known fixed category values to skip
-        let fixedValues = ['retail_tea','wholesale_tea','retail_makhana','wholesale_makhana','b2b','makhana','tea','gift','horeca','economy grade','standard grade','premium grade','mix grade','processed','general','black','green','retail','gifting','retail tea','wholesale tea','retail makhana','wholesale makhana'];
         let b2bBtn = document.getElementById('pcat_b2b');
-        cats.forEach(c => {
-            let slug = c.toLowerCase().trim();
-            if(fixedValues.includes(slug)) return; // skip already handled
-            let btnId = 'pcat_custom_' + slug.replace(/\s+/g,'_');
-            if(document.getElementById(btnId)) return; // already exists
+        // Only "Retail X" tabs show karein (Wholesale X skip — B2B tab handles those)
+        let retailCustom = cats.filter(c => c.toLowerCase().startsWith('retail ') &&
+            !['retail tea','retail makhana'].includes(c.toLowerCase()));
+        retailCustom.forEach(c => {
+            let slug = c.toLowerCase().trim().replace(/\s+/g,'_');
+            let btnId = 'pcat_custom_' + slug;
+            if(document.getElementById(btnId)) return;
             let btn = document.createElement('button');
             btn.id = btnId;
             btn.className = 'pcat-tab pcat-tab-custom';
-            btn.textContent = '🏷️ ' + c;
+            let baseName = c.replace(/^Retail\s+/i,'').trim();
+            btn.textContent = '🏷️ ' + baseName;
             btn.onclick = function(){ filterAdminProducts('custom:' + c); };
-            // Insert before B2B button
             if(b2bBtn) pcatContainer.insertBefore(btn, b2bBtn);
             else pcatContainer.appendChild(btn);
         });
@@ -11765,16 +11792,18 @@ function populateCategoryDropdowns() {
     let hpContainer = document.getElementById('hpTabsContainer');
     if(hpContainer) {
         hpContainer.querySelectorAll('.hp-tab-custom').forEach(el => el.remove());
-        let fixedShopValues = ['retail_tea','wholesale_tea','retail_makhana','wholesale_makhana','makhana','tea','gift','horeca','economy grade','standard grade','premium grade','mix grade','processed','general','black','green','retail','gifting','retail tea','wholesale tea','retail makhana','wholesale makhana'];
-        cats.forEach(c => {
-            let slug = c.toLowerCase().trim();
-            if(fixedShopValues.includes(slug)) return;
-            let btnId = 'hpTab_custom_' + slug.replace(/\s+/g,'_');
+        // Home shop tabs: sirf "Retail X" tabs, base name dikhao
+        let retailShopCats = cats.filter(c => c.toLowerCase().startsWith('retail ') &&
+            !['retail tea','retail makhana'].includes(c.toLowerCase()));
+        retailShopCats.forEach(c => {
+            let slug = c.toLowerCase().trim().replace(/\s+/g,'_');
+            let btnId = 'hpTab_custom_' + slug;
             if(document.getElementById(btnId)) return;
             let btn = document.createElement('button');
             btn.id = btnId;
             btn.className = 'hp-tab hp-tab-custom';
-            btn.textContent = '🏷️ ' + c;
+            let baseName = c.replace(/^Retail\s+/i,'').trim();
+            btn.textContent = '🏷️ ' + baseName;
             btn.onclick = function(){ filterHomeProducts('custom:' + c); };
             hpContainer.appendChild(btn);
         });
