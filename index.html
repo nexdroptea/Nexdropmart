@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.3 applied | v36.1 — B2B sync fix: saveB2B() ab settings table mein bhi upsert karta hai (nexdrop_b2b key), initSupabase B2B load Supabase-primary ho gaya, autoRefresh B2B load cleaned | v36 below -->
+<!-- 🔒 SECURITY PATCH v2.3 applied | v36.6 — Wholesale Add to Cart removed: grid card, product modal, stock manager — sirf View & Enquire + WhatsApp | v36.5 — Khata 8-bug fix: (1) ts-based entry delete (2) duplicate switchTab patch removed (3) reset orphan entries fix (4) WhatsApp blank URL guard (5) XSS in print window (6) khataOpenCustomer race condition (7) date field reset after entry | v36.4 — Fully Dynamic Categories: hardcoded Tea/Makhana tabs/stat-cards/filters sab hata diye, sab kuch getCategories() se dynamically generate hota hai — admin filter tabs, homepage tabs, B2B tabs, dashboard stat cards sab; filterAdminProducts/loadAdminProducts dyncat: support; switchToCategory dynamic; populateCategoryDropdowns full rebuild (no stale tabs) | v36.2 below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -746,22 +746,17 @@ async function sbLoadCoupons() {
 
 // Coupon use count update
 async function sbIncrementCoupon(code) {
-    // ✅ FIX: localStorage mein bhi usedCount update karo (admin panel display ke liye)
+    // ✅ FIX: Sirf localStorage update karo (saveCoupons Supabase upsert already karta hai)
+    // Pehle: localStorage increment + alag Supabase direct increment = DOUBLE INCREMENT bug
     try {
         let coupons = getCoupons();
         let idx = coupons.findIndex(c => c.code === code);
         if(idx > -1) {
             coupons[idx].usedCount = (coupons[idx].usedCount || 0) + 1;
-            saveCoupons(coupons);
-        }
-    } catch(e) { console.log('localStorage coupon increment error:', e.message); }
-    // Supabase mein bhi update karo
-    try {
-        const { data } = await db.from('coupons').select('used_count').eq('code', code).single();
-        if(data) {
-            await db.from('coupons').update({ used_count: (data.used_count || 0) + 1 }).eq('code', code);
+            saveCoupons(coupons); // saveCoupons internally Supabase upsert bhi karta hai
         }
     } catch(e) { console.log('sbIncrementCoupon error:', e.message); }
+    // ✅ FIX: Duplicate direct Supabase increment remove kiya — saveCoupons ne already sync kar diya
 }
 
 // ============================================================
@@ -2152,7 +2147,34 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <!-- B2C Products -->
 <div id="b2c-section" class="section">
     <h2 class="section-title">Our Products — Retail & Wholesale 🌾☕</h2>
-    <div class="product-grid" id="productGrid"></div>
+
+    <!-- Retail Category Filter Tabs -->
+    <div id="retailTabsContainer" style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.5rem;">
+        <button id="retailTab_all" class="hp-tab hp-tab-active" onclick="filterRetailProducts('all')">🛍️ All Retail</button>
+        <button id="retailTab_tea" class="hp-tab" onclick="filterRetailProducts('tea')">☕ Tea</button>
+        <button id="retailTab_makhana" class="hp-tab" onclick="filterRetailProducts('makhana')">🌾 Makhana</button>
+    </div>
+
+    <!-- Retail Tea Heading -->
+    <div id="retailTeaHeading" style="display:none;margin-bottom:0.8rem;">
+        <div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;border-left:4px solid #1565c0;">
+            <span style="font-size:1.3rem;">☕</span>
+            <span style="font-weight:700;color:#1565c0;font-size:0.95rem;">Retail Tea</span>
+        </div>
+    </div>
+    <div class="product-grid" id="retailTeaGrid" style="margin-bottom:2rem;"></div>
+
+    <!-- Retail Makhana Heading -->
+    <div id="retailMakhanaHeading" style="display:none;margin-bottom:0.8rem;">
+        <div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:linear-gradient(135deg,#f3e5f5,#e1bee7);border-radius:12px;border-left:4px solid #7b1fa2;">
+            <span style="font-size:1.3rem;">🌾</span>
+            <span style="font-weight:700;color:#7b1fa2;font-size:0.95rem;">Retail Makhana</span>
+        </div>
+    </div>
+    <div class="product-grid" id="retailMakhanaGrid" style="margin-bottom:2rem;"></div>
+
+    <!-- Legacy single grid (hidden, kept for compatibility) -->
+    <div class="product-grid" id="productGrid" style="display:none;"></div>
 </div>
 
 <!-- B2B -->
@@ -3665,10 +3687,6 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <div class="stat-card" style="background:linear-gradient(135deg,#e0f2f1,#b2dfdb);border:1px solid #80cbc4;"><div class="stat-number" id="statTotalStock" style="font-size:1.5rem;color:#00695c;">0</div><div>📦 Total Stock</div></div>
 <div class="stat-card" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:2px solid #2c5a4a;cursor:pointer;" onclick="switchTab('products')" title="Retail stock"><div class="stat-number" id="statRetailStock" style="font-size:1.5rem;color:#2c5a4a;">0</div><div>🛒 Retail Stock</div></div>
 <div class="stat-card" style="background:linear-gradient(135deg,#fff8f0,#ffe0b2);border:2px solid #c49a6c;cursor:pointer;" onclick="switchTab('b2b')" title="Wholesale stock"><div class="stat-number" id="statWholesaleStock" style="font-size:1.5rem;color:#c49a6c;">0</div><div>🏭 Wholesale Stock</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border:2px solid #1565c0;cursor:pointer;" onclick="switchToCategory('retail_tea')" title="Retail Tea stock"><div class="stat-number" id="statRetailTeaStock" style="font-size:1.5rem;color:#1565c0;">0</div><div>☕ Retail Tea</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#e0f2f1,#b2dfdb);border:2px solid #00695c;cursor:pointer;" onclick="switchToCategory('wholesale_tea')" title="Wholesale Tea stock"><div class="stat-number" id="statWholesaleTeaStock" style="font-size:1.5rem;color:#00695c;">0</div><div>🍵 Wholesale Tea</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#f3e5f5,#e1bee7);border:2px solid #7b1fa2;cursor:pointer;" onclick="switchToCategory('retail_makhana')" title="Retail Makhana stock"><div class="stat-number" id="statRetailMakhanaStock" style="font-size:1.5rem;color:#7b1fa2;">0</div><div>🌾 Retail Makhana</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#fff8e1,#ffecb3);border:2px solid #f57f17;cursor:pointer;" onclick="switchToCategory('wholesale_makhana')" title="Wholesale Makhana stock"><div class="stat-number" id="statWholesaleMakhanaStock" style="font-size:1.5rem;color:#f57f17;">0</div><div>📦 Wholesale Makhana</div></div>
 <div class="stat-card" style="background:linear-gradient(135deg,#fff8e1,#ffecb3);border:1px solid #ffd54f;"><div class="stat-number" id="statLowStock" style="font-size:1.5rem;color:#f57f17;">0</div><div>⚠️ Low Stock</div></div>
 <div class="stat-card" style="background:linear-gradient(135deg,#fce4ec,#f8bbd9);border:1px solid #f48fb1;"><div class="stat-number" id="statOutStock" style="font-size:1.5rem;color:#b71c1c;">0</div><div>❌ Out Stock</div></div>
 </div>
@@ -3934,14 +3952,11 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <button class="save-btn" onclick="addProduct()" style="margin-top:0.6rem;width:100%;">+ Add Product</button>
 </div>
 
-<!-- Category Filter Tabs for Products -->
+<!-- Category Filter Tabs for Products — Fully Dynamic v36.2 -->
 <div id="pcatTabsContainer" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.8rem;padding:0.5rem;background:#f0f7f4;border-radius:12px;border:1px solid #c8e6c9;">
   <strong style="font-size:0.75rem;color:#2c5a4a;align-self:center;margin-right:0.2rem;">📂 Category:</strong>
   <button id="pcat_all" class="pcat-tab pcat-active" onclick="filterAdminProducts('all')">🛍️ All Products</button>
-  <button id="pcat_retail_tea" class="pcat-tab" onclick="filterAdminProducts('retail_tea')">☕ Retail Tea</button>
-  <button id="pcat_wholesale_tea" class="pcat-tab" onclick="filterAdminProducts('wholesale_tea')">🍵 Wholesale Tea</button>
-  <button id="pcat_retail_makhana" class="pcat-tab" onclick="filterAdminProducts('retail_makhana')">🌾 Retail Makhana</button>
-  <button id="pcat_wholesale_makhana" class="pcat-tab" onclick="filterAdminProducts('wholesale_makhana')">📦 Wholesale Makhana</button>
+  <!-- Dynamic category tabs yahan inject hote hain populateCategoryDropdowns() se -->
   <button id="pcat_b2b" class="pcat-tab" onclick="filterAdminProducts('b2b')">🏭 B2B Products</button>
   <span id="pcatCountLabel" style="font-size:0.72rem;color:#c49a6c;font-weight:700;align-self:center;margin-left:auto;"></span>
 </div>
@@ -5094,81 +5109,81 @@ function updateStats() {
     let retailStock = products.reduce((s,p) => s + (p.stockQty || 0), 0);
     let b2bStock = b2bProducts.reduce((s,p) => s + (p.stockQty || 0), 0);
     let totalStock = retailStock + b2bStock;
-    // Category-wise stock for dashboard cards — correct 4-way split
-    let rtea=0, wtea=0, rmak=0, wmak=0;
-    products.forEach(p => {
-        let c = getProductCategory4(p, false);
-        let cat = (p.category||'').toLowerCase().trim();
-        if(c === 'retail_tea' || cat === 'retail tea') rtea += (p.stockQty||0);
-        else if(c === 'retail_makhana' || cat === 'retail makhana') rmak += (p.stockQty||0);
-        // custom categories: handled separately in custom cards
-    });
-    b2bProducts.forEach(p => {
-        let c = getProductCategory4(p, true);
-        let cat = (p.category||'').toLowerCase().trim();
-        if(c === 'wholesale_tea' || cat === 'wholesale tea') wtea += (p.stockQty||0);
-        else if(c === 'wholesale_makhana' || cat === 'wholesale makhana') wmak += (p.stockQty||0);
-        // custom categories: handled separately in custom cards
-    });
     let setEl2 = (id,v) => { let e=document.getElementById(id); if(e) e.innerText=v; };
     setEl2('statTotalStock', totalStock);
     setEl2('statRetailStock', retailStock);
     setEl2('statWholesaleStock', b2bStock);
-    setEl2('statRetailTeaStock', rtea);
-    setEl2('statWholesaleTeaStock', wtea);
-    setEl2('statRetailMakhanaStock', rmak);
-    setEl2('statWholesaleMakhanaStock', wmak);
     let lsEl = document.getElementById('statLowStock'); if(lsEl) lsEl.innerText = lowStockCount;
     let osEl = document.getElementById('statOutStock'); if(osEl) osEl.innerText = outStockCount;
 
-    // ✅ v31: Custom categories ka stock dynamically calculate + render karo
+    // ✅ v36.2: ALL category stat cards dynamically rendered — hardcoded Tea/Makhana cards hata diye
     (function renderCustomCatStockCards() {
         let container = document.getElementById('statCustomCatCards');
         if(!container) return;
         let cats = typeof getCategories === 'function' ? getCategories() : [];
-        // 4 fixed categories — inhe skip karo (already have cards above)
-        let fixedKeys = ['retail_tea','wholesale_tea','retail_makhana','wholesale_makhana'];
-        let fixedNames = ['Retail Tea','Wholesale Tea','Retail Makhana','Wholesale Makhana'];
 
-        // Custom categories = "Retail X" wali categories (Wholesale X skip — ek card per base cat)
-        // Fixed 4 already handled above
-        let retailCustomCats = cats.filter(c => c.toLowerCase().startsWith('retail ') &&
-            !['retail tea','retail makhana'].includes(c.toLowerCase()));
-
-        if(!retailCustomCats.length) { container.innerHTML = ''; return; }
+        // All unique base names from categories (strip Retail/Wholesale prefix)
+        let baseNames = [];
+        cats.forEach(c => {
+            let base = c.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
+            if(base && !baseNames.find(b => b.toLowerCase() === base.toLowerCase())) baseNames.push(base);
+        });
 
         const stylePool = [
-            {bg:'linear-gradient(135deg,#e8eaf6,#c5cae9)',border:'#9fa8da',color:'#1a237e'},
-            {bg:'linear-gradient(135deg,#fce4ec,#f8bbd9)',border:'#f48fb1',color:'#880e4f'},
-            {bg:'linear-gradient(135deg,#e0f7fa,#b2ebf2)',border:'#80deea',color:'#006064'},
-            {bg:'linear-gradient(135deg,#fff8e1,#ffecb3)',border:'#ffe082',color:'#f57f17'},
-            {bg:'linear-gradient(135deg,#f1f8e9,#dcedc8)',border:'#aed581',color:'#33691e'},
-            {bg:'linear-gradient(135deg,#fbe9e7,#ffccbc)',border:'#ff8a65',color:'#bf360c'},
-            {bg:'linear-gradient(135deg,#ede7f6,#d1c4e9)',border:'#b39ddb',color:'#311b92'},
-            {bg:'linear-gradient(135deg,#e8f5e9,#c8e6c9)',border:'#a5d6a7',color:'#1b5e20'},
+            {retail:{bg:'linear-gradient(135deg,#e3f2fd,#bbdefb)',border:'#64b5f6',color:'#0d47a1'},
+             wholesale:{bg:'linear-gradient(135deg,#e8eaf6,#c5cae9)',border:'#9fa8da',color:'#1a237e'}},
+            {retail:{bg:'linear-gradient(135deg,#e0f2f1,#b2dfdb)',border:'#4dd0e1',color:'#00695c'},
+             wholesale:{bg:'linear-gradient(135deg,#f3e5f5,#e1bee7)',border:'#ce93d8',color:'#6a1b9a'}},
+            {retail:{bg:'linear-gradient(135deg,#fce4ec,#f8bbd9)',border:'#f48fb1',color:'#880e4f'},
+             wholesale:{bg:'linear-gradient(135deg,#fff8e1,#ffecb3)',border:'#ffd54f',color:'#e65100'}},
+            {retail:{bg:'linear-gradient(135deg,#e8f5e9,#c8e6c9)',border:'#66bb6a',color:'#1b5e20'},
+             wholesale:{bg:'linear-gradient(135deg,#fbe9e7,#ffccbc)',border:'#ff8a65',color:'#bf360c'}},
+            {retail:{bg:'linear-gradient(135deg,#e0f7fa,#b2ebf2)',border:'#80deea',color:'#006064'},
+             wholesale:{bg:'linear-gradient(135deg,#f3e5f5,#e1bee7)',border:'#ba68c8',color:'#4a148c'}},
         ];
 
-        container.innerHTML = retailCustomCats.map((cat, i) => {
-            let baseName = cat.replace(/^Retail\s+/i,'').trim();
-            let wholeName = 'Wholesale ' + baseName;
-            let stock = 0;
-            // Match: "Retail X", "X" (bare/old), exact cat name — saare variants count karo
-            products.forEach(p => {
-                let pc = (p.category||'').toLowerCase().trim();
-                if(pc === cat.toLowerCase() || pc === baseName.toLowerCase()) stock += (p.stockQty||0);
-            });
-            b2bProducts.forEach(p => {
-                let pc = (p.category||'').toLowerCase().trim();
-                if(pc === wholeName.toLowerCase() || pc === baseName.toLowerCase()) stock += (p.stockQty||0);
-            });
+        let html = '';
+        let knownRetailCats = baseNames.map(b => ('retail '+b).toLowerCase());
+        let knownWholeCats  = baseNames.map(b => ('wholesale '+b).toLowerCase());
+        let knownBareCats   = baseNames.map(b => b.toLowerCase());
+
+        baseNames.forEach((baseName, i) => {
+            let retailCatName = 'Retail ' + baseName;
+            let wholeCatName  = 'Wholesale ' + baseName;
             let s = stylePool[i % stylePool.length];
-            let safeKey = cat.replace(/[^a-zA-Z0-9]/g,'_');
-            return `<div class="stat-card" style="background:${s.bg};border:2px solid ${s.border};cursor:pointer;min-width:120px;" onclick="openCatEditModal('${cat}')" title="Edit ${cat} products">
-                <div class="stat-number" id="statCustCat_${safeKey}" style="font-size:1.5rem;color:${s.color};">${stock}</div>
-                <div style="font-size:0.72rem;color:${s.color};font-weight:600;">🏷️ ${baseName}</div>
-                <div style="font-size:0.6rem;color:${s.color};opacity:0.7;">Retail+Wholesale</div>
+
+            let retailStk = products.reduce((s,p) => {
+                let pc = (p.category||'').toLowerCase().trim();
+                return (pc === retailCatName.toLowerCase() || pc === baseName.toLowerCase()) ? s + (p.stockQty||0) : s;
+            }, 0);
+            let wholesaleStk = b2bProducts.reduce((s,p) => {
+                let pc = (p.category||'').toLowerCase().trim();
+                return (pc === wholeCatName.toLowerCase() || pc === baseName.toLowerCase()) ? s + (p.stockQty||0) : s;
+            }, 0);
+
+            let safeBase = baseName.replace(/[^a-zA-Z0-9]/g,'_');
+            // emoji guess
+            let bl = baseName.toLowerCase();
+            let emoji = bl.includes('tea')||bl.includes('chai') ? '🍵' : bl.includes('makhana') ? '🌾' : bl.includes('gift') ? '🎁' : bl.includes('spice') ? '🌶️' : bl.includes('honey') ? '🍯' : '📦';
+
+            html += `<div class="stat-card" style="background:${s.retail.bg};border:2px solid ${s.retail.border};cursor:pointer;min-width:110px;" onclick="openCatEditModal('${retailCatName}')" title="${retailCatName}">
+                <div class="stat-number" id="statDynCat_retail_${safeBase}" style="font-size:1.5rem;color:${s.retail.color};">${retailStk}</div>
+                <div style="font-size:0.7rem;color:${s.retail.color};font-weight:600;">${emoji} ${baseName}<br><span style="font-size:0.62rem;opacity:0.8;">Retail</span></div>
             </div>`;
-        }).join('');
+            html += `<div class="stat-card" style="background:${s.wholesale.bg};border:2px solid ${s.wholesale.border};cursor:pointer;min-width:110px;" onclick="openCatEditModal('${wholeCatName}')" title="${wholeCatName}">
+                <div class="stat-number" id="statDynCat_wholesale_${safeBase}" style="font-size:1.5rem;color:${s.wholesale.color};">${wholesaleStk}</div>
+                <div style="font-size:0.7rem;color:${s.wholesale.color};font-weight:600;">${emoji} ${baseName}<br><span style="font-size:0.62rem;opacity:0.8;">Wholesale</span></div>
+            </div>`;
+        });
+
+        // Uncategorized catch-all
+        let allKnown = [...knownRetailCats,...knownWholeCats,...knownBareCats];
+        let uncatRetail = products.reduce((s,p) => !allKnown.includes((p.category||'').toLowerCase().trim()) ? s+(p.stockQty||0) : s, 0);
+        let uncatWhole  = b2bProducts.reduce((s,p) => !allKnown.includes((p.category||'').toLowerCase().trim()) ? s+(p.stockQty||0) : s, 0);
+        if(uncatRetail > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#f5f5f5,#eeeeee);border:2px dashed #bdbdbd;min-width:110px;"><div class="stat-number" style="font-size:1.5rem;color:#616161;">${uncatRetail}</div><div style="font-size:0.7rem;color:#616161;font-weight:600;">❓ Other<br><span style="font-size:0.62rem;opacity:0.8;">Retail</span></div></div>`;
+        if(uncatWhole  > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#f5f5f5,#eeeeee);border:2px dashed #bdbdbd;min-width:110px;"><div class="stat-number" style="font-size:1.5rem;color:#616161;">${uncatWhole}</div><div style="font-size:0.7rem;color:#616161;font-weight:600;">❓ Other<br><span style="font-size:0.62rem;opacity:0.8;">Wholesale</span></div></div>`;
+
+        container.innerHTML = html;
     })();
     // Original updateStats code follows:
     if(document.getElementById('statProducts')) document.getElementById('statProducts').innerText = products.length;
@@ -5285,18 +5300,21 @@ function renderHighlights(highlights, type) {
     let style = type === 'b2b' ? 'background:linear-gradient(135deg,#fff8f0,#ffecd2);color:#c49a6c;border-color:#f0c88a;' : '';
     return '<div class="product-highlights">' + highlights.map(function(h){ return '<span class="highlight-tag" style="' + style + '">' + h + '</span>'; }).join('') + '</div>';
 }
-function displayProducts() {
-    let html = '';
-    for(let p of products) {
-        let discPrice = Math.round(p.price - (p.price * (p.discount||0) / 100));
-        let stars = '';
-        for(let i=1;i<=5;i++) stars += i <= Math.floor(p.rating) ? '★' : '☆';
-        let imgHtml = p.imageType === 'upload' && p.imageValue ? `<img src="${p.imageValue}">` : `<span style="font-size:3rem;">${p.imageValue}</span>`;
-        html += `<div class="product-card" style="cursor:pointer;" onclick="openProductModal('retail',${p.id})">
+function buildRetailCard(p) {
+    let discPrice = Math.round(p.price - (p.price * (p.discount||0) / 100));
+    let stars = '';
+    for(let i=1;i<=5;i++) stars += i <= Math.floor(p.rating) ? '★' : '☆';
+    let imgHtml = p.imageType === 'upload' && p.imageValue ? `<img src="${p.imageValue}">` : `<span style="font-size:3rem;">${p.imageValue}</span>`;
+    let stockBadge = '';
+    if(!p.inStock || p.stockQty === 0) stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">❌ Out of Stock</div>';
+    else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 5) stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">🔥 Only ' + p.stockQty + ' left!</div>';
+    else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10) stockBadge = '<div style="font-size:0.65rem;color:#ff9800;font-weight:700;margin:2px 0;">⚡ Only ' + p.stockQty + ' remaining</div>';
+    return `<div class="product-card" style="cursor:pointer;" onclick="openProductModal('retail',${p.id})">
   <div class="product-image">${imgHtml}</div>
   <div class="product-info">
     <div class="product-name">${p.name}</div>
     <div class="price"><span class="current-price">₹${Math.round(discPrice)}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+p.priceUnit+'</span>':''}</span>${p.discount>0?' <span style="font-size:0.9rem;color:#999;margin:0 4px;">-</span> <span class="original-price" style="font-size:0.85rem;text-decoration:line-through;">₹'+p.price+'</span> <span style="font-size:0.65rem;background:#2c5a4a;color:white;padding:1px 6px;border-radius:10px;margin-left:2px;">'+p.discount+'% OFF</span>':''}</div>
+    ${stockBadge}
     <div style="display:flex;gap:0.3rem;margin-top:0.6rem;">
       <button class="add-to-cart" onclick="event.stopPropagation();addToCart(${p.id});showToast('✅ Added to cart!','#2c5a4a');" style="flex:1;background:#2c5a4a;font-size:0.75rem;padding:0.55rem 0.4rem;">🛒 Add to Cart</button>
     </div>
@@ -5313,8 +5331,71 @@ function displayProducts() {
     </div>
   </div>
 </div>`;
+}
+
+let _currentRetailFilter = 'all';
+function filterRetailProducts(cat) {
+    _currentRetailFilter = cat;
+    document.querySelectorAll('[id^="retailTab_"]').forEach(t => t.classList.remove('hp-tab-active'));
+    // Static tab match
+    let activeTab = document.getElementById('retailTab_' + cat);
+    // Dynamic tab match
+    if(!activeTab) {
+        retailContainer = document.getElementById('retailTabsContainer');
+        if(retailContainer) {
+            retailContainer.querySelectorAll('.hp-tab-dynamic').forEach(btn => {
+                if(btn._filterCat && btn._filterCat === cat) btn.classList.add('hp-tab-active');
+                else btn.classList.remove('hp-tab-active');
+            });
+        }
     }
-    document.getElementById('productGrid').innerHTML = html;
+    if(activeTab) activeTab.classList.add('hp-tab-active');
+    displayProducts();
+}
+
+function displayProducts() {
+    let currentFilter = typeof _currentRetailFilter !== 'undefined' ? _currentRetailFilter : 'all';
+
+    let teaProducts = products.filter(p => {
+        if(currentFilter === 'tea') return getProductCategory4(p, false) === 'retail_tea';
+        if(currentFilter === 'makhana') return false;
+        if(currentFilter && currentFilter.startsWith('dyncat:')) return false;
+        return getProductCategory4(p, false) === 'retail_tea';
+    });
+    let makhanaProducts = products.filter(p => {
+        let c = getProductCategory4(p, false);
+        if(currentFilter === 'makhana') return c === 'retail_makhana' || c.startsWith('custom_retail:');
+        if(currentFilter === 'tea') return false;
+        if(currentFilter && currentFilter.startsWith('dyncat:')) {
+            let dynCat = currentFilter.replace('dyncat:','');
+            return (p.category || '').toLowerCase() === dynCat.toLowerCase();
+        }
+        return c === 'retail_makhana' || c.startsWith('custom_retail:');
+    });
+
+    let showTea = currentFilter === 'all' || currentFilter === 'tea';
+    let showMakhana = currentFilter === 'all' || currentFilter === 'makhana' || (currentFilter && currentFilter.startsWith('dyncat:'));
+
+    let teaGrid = document.getElementById('retailTeaGrid');
+    let makhanaGrid = document.getElementById('retailMakhanaGrid');
+    let teaHeading = document.getElementById('retailTeaHeading');
+    let makhanaHeading = document.getElementById('retailMakhanaHeading');
+
+    if(teaGrid) teaGrid.innerHTML = showTea ? teaProducts.map(buildRetailCard).join('') : '';
+    if(makhanaGrid) makhanaGrid.innerHTML = showMakhana ? makhanaProducts.map(buildRetailCard).join('') : '';
+    if(teaHeading) teaHeading.style.display = showTea && teaProducts.length > 0 ? 'block' : 'none';
+    if(makhanaHeading) {
+        let makhanaLabel = currentFilter && currentFilter.startsWith('dyncat:')
+            ? currentFilter.replace('dyncat:','').replace(/^Retail\s+/i,'')
+            : 'Retail Makhana';
+        let labelEl = makhanaHeading.querySelector('span:last-child');
+        if(labelEl) labelEl.textContent = makhanaLabel;
+        makhanaHeading.style.display = showMakhana && makhanaProducts.length > 0 ? 'block' : 'none';
+    }
+
+    // Legacy grid saaf karo
+    let legacyGrid = document.getElementById('productGrid');
+    if(legacyGrid) legacyGrid.innerHTML = '';
 }
 function displayB2B() {
     let currentFilter = typeof _currentB2BFilter !== 'undefined' ? _currentB2BFilter : 'all';
@@ -5351,14 +5432,13 @@ function displayB2B() {
         let numPrice = parseFloat(priceStr.replace(/[^0-9.]/g,'').replace(/^(\d+).*$/,'$1'));
         let hasNumericPrice = !isRangePrice && !isNaN(numPrice) && numPrice > 0;
         let discPrice = hasNumericPrice ? Math.round(numPrice - numPrice*(p.discount||0)/100) : null;
+        // ✅ FIX: Wholesale par Add to Cart nahi — sirf View & Enquire + Quick View
         let enquireBtn = !p.inStock
             ? `<button class="add-to-cart" style="background:#ccc;cursor:not-allowed;margin-top:0.8rem;" disabled>❌ Out of Stock</button>`
-            : hasNumericPrice
-                ? `<div style="display:flex;gap:0.4rem;margin-top:0.8rem;">
-                     <button class="add-to-cart" style="background:linear-gradient(135deg,#c49a6c,#a07840);flex:1;" onclick="event.stopPropagation();addToCart(${p.id},'b2b');showToast('✅ ${p.name} cart mein add hua!','#c49a6c');">🛒 Add to Cart</button>
-                     <button style="background:#f0f7f0;color:#2c5a4a;border:1px solid #c8e6c9;border-radius:40px;padding:0.55rem 0.8rem;cursor:pointer;font-size:0.82rem;font-weight:600;" onclick="event.stopPropagation();openProductModal('b2b',${p.id})">🔍</button>
-                   </div>`
-                : `<button class="add-to-cart" style="background:linear-gradient(135deg,#2c5a4a,#1e3f34);margin-top:0.8rem;" onclick="event.stopPropagation();openProductModal('b2b',${p.id})">📦 View & Enquire</button>`;
+            : `<div style="display:flex;gap:0.4rem;margin-top:0.8rem;">
+                 <button class="add-to-cart" style="background:linear-gradient(135deg,#2c5a4a,#1e3f34);flex:1;" onclick="event.stopPropagation();openProductModal('b2b',${p.id})">📦 View & Enquire</button>
+                 <button style="background:#f0f7f0;color:#2c5a4a;border:1px solid #c8e6c9;border-radius:40px;padding:0.55rem 0.8rem;cursor:pointer;font-size:0.82rem;font-weight:600;" onclick="event.stopPropagation();openProductModal('b2b',${p.id})">🔍</button>
+               </div>`;
         return `<div class="product-card" style="cursor:pointer;" onclick="openProductModal('b2b',${p.id})">
             ${discountBadge}${catBadge}
             <div class="product-image">${imgHtml}</div>
@@ -5527,26 +5607,19 @@ function openProductModal(type, id) {
         cartBtn.style.display = '';
         cartBtn.disabled = false;
         cartBtn.style.cursor = 'pointer';
-        if(hasNumericPrice && p.inStock) {
-            let discPrice = Math.round(numPrice - numPrice*(p.discount||0)/100);
-            cartBtn.style.background = 'linear-gradient(135deg,#c49a6c,#a07840)';
-            cartBtn.innerText = '🛒 Add to Cart — ₹' + discPrice;
-            cartBtn.onclick = function() {
-                addToCart(p.id, 'b2b');
-                showToast('✅ ' + p.name + ' wholesale cart mein add hua!', '#c49a6c');
-                closeProductModal();
-            };
-        } else if(!p.inStock) {
+        // ✅ FIX: B2B modal mein Add to Cart nahi — sirf WhatsApp Enquire
+        if(!p.inStock) {
             cartBtn.disabled = true;
             cartBtn.style.background = '#ccc';
             cartBtn.style.cursor = 'not-allowed';
             cartBtn.innerText = '❌ Out of Stock';
         } else {
-            cartBtn.style.background = '#c49a6c';
-            cartBtn.innerText = '📞 Enquire on WhatsApp';
+            let priceText = hasNumericPrice ? ' — ₹' + Math.round(numPrice - numPrice*(p.discount||0)/100) + '/kg' : '';
+            cartBtn.style.background = 'linear-gradient(135deg,#25D366,#128C7E)';
+            cartBtn.innerText = '📞 Enquire on WhatsApp' + priceText;
             cartBtn.onclick = function() {
                 closeProductModal();
-                window.open('https://wa.me/'+(settings.whatsappNo||'919006606697')+'?text='+encodeURIComponent('Hi, I want bulk/wholesale enquiry for:\n*'+p.name+'*\nCategory: '+p.category+'\nMin Order: '+p.minQty+'\n\nPlease share current pricing.'), '_blank');
+                window.open('https://wa.me/'+(settings.whatsappNo||'919006606697')+'?text='+encodeURIComponent('Hi, I want bulk/wholesale enquiry for:\n*'+p.name+'*\nCategory: '+p.category+'\nMin Order: '+p.minQty+(hasNumericPrice?' | Price: ₹'+Math.round(numPrice - numPrice*(p.discount||0)/100)+'/kg':'')+'\n\nPlease share current pricing.'), '_blank');
             };
         }
         waBtn.onclick = function() {
@@ -5807,11 +5880,16 @@ async function checkout() {
         customerStateCode: (currentUser && currentUser.stateCode) ? currentUser.stateCode : ''
     };
     orders.unshift(order);
-    // Supabase mein save karo — actual order object pass karo taaki id sync ho
-    await sbSaveOrder(order); // ✅ P2 FIX v27: await added — rapid navigation se data loss prevent hoga
+    // ✅ FIX: try/catch — Supabase failure pe graceful error + localStorage fallback
+    try {
+        await sbSaveOrder(order);
+    } catch(e) {
+        console.error('[checkout] Supabase save failed, localStorage fallback active:', e);
+        showToast('⚠️ Order saved locally (server sync pending)', '#e67e22');
+    }
     localStorage.setItem('nexdrop_orders', JSON.stringify(orders));
     // Coupon use count increment
-    if(activeCoupon) { sbIncrementCoupon(activeCoupon.code); activeCoupon = null; }
+    if(activeCoupon) { try { sbIncrementCoupon(activeCoupon.code); } catch(e){} activeCoupon = null; }
     updateStats();
     let itemLines = cart.map(i => (i.isB2B?'[W] ':'')+i.name + " x " + i.quantity + " = ₹" + (i.price * i.quantity)).join("\n");
     let couponLine = couponDiscount > 0 ? "\nCoupon Discount: -₹" + couponDiscount : (isFreeShipping ? "\nCoupon: Free Shipping" : "");
@@ -6783,15 +6861,25 @@ function loadAdminProducts() {
         if(msgs.length) { alertEl.style.display='block'; document.getElementById('lowStockItems').innerText = msgs.join(' | '); }
         else { alertEl.style.display='none'; }
     }
-    // Apply category filter
+    // Apply category filter — v36.2: dyncat: + custom: + legacy slugs sab handle
     let pcat = typeof _currentAdminPcat !== 'undefined' ? _currentAdminPcat : 'all';
     let filteredProducts = products.filter(p => {
         if(pcat === 'all') return true;
+        if(pcat === 'b2b') return false; // B2B tab alag handle karta hai
+        if(pcat === 'retail_tea') return (p.category||'').toLowerCase().trim() === 'retail tea';
+        if(pcat === 'wholesale_tea') return (p.category||'').toLowerCase().trim() === 'wholesale tea';
+        if(pcat === 'retail_makhana') return (p.category||'').toLowerCase().trim() === 'retail makhana';
+        if(pcat === 'wholesale_makhana') return (p.category||'').toLowerCase().trim() === 'wholesale makhana';
+        if(pcat.startsWith('dyncat:')) {
+            let dynCat = pcat.slice(7).toLowerCase().trim();
+            return (p.category||'').toLowerCase().trim() === dynCat;
+        }
         if(pcat.startsWith('custom:')) {
             let customCat = pcat.slice(7).toLowerCase().trim();
-            return (p.category || '').toLowerCase().trim() === customCat;
+            return (p.category||'').toLowerCase().trim() === customCat;
         }
-        return getProductCategory4(p, false) === pcat;
+        // fallback: direct category name match
+        return (p.category||'').toLowerCase().trim() === pcat.toLowerCase().replace(/_/g,' ');
     });
     // Update count label
     let countLbl = document.getElementById('pcatCountLabel');
@@ -6950,7 +7038,7 @@ function uploadAdminPhoto(id, input) {
     };
     reader.readAsDataURL(file);
 }
-function toggleStock(id) { let p=products.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveProducts(); loadAdminProducts(); displayProducts(); } }
+function toggleStock(id) { let p=products.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveProducts(); loadAdminProducts(); displayProducts(); if(typeof refreshStockDashboard==='function') refreshStockDashboard(); } }
 function toggleCOD(id) { 
     let p=products.find(p=>p.id===id); 
     if(p){ 
@@ -7834,6 +7922,16 @@ async function clearAllTestData() {
     ];
 
     // 4. Settings mein se test keys delete karo
+    // ✅ BUG FIX: Khata entries bhi delete karo (orphan data fix)
+    const khataCustomersForReset = khataGetAll();
+    const khataEntryDeleteOps = khataCustomersForReset.map(c =>
+        db.from('settings').delete().eq('key', 'nexdrop_khata_entries_' + c.id)
+    );
+    // Also clear localStorage entries
+    khataCustomersForReset.forEach(c => {
+        try { localStorage.removeItem('nexdrop_khata_entries_' + c.id); } catch(e) {}
+    });
+
     const settingsKeysToDelete = [
         'nexdrop_orders', 'nexdrop_users', 'nexdrop_bulk',
         'nexdrop_bills', 'nexdrop_dealership', 'nexdrop_bill_counter',
@@ -7841,9 +7939,10 @@ async function clearAllTestData() {
         'nexdrop_pb_bills', 'nexdrop_reviews', 'nexdrop_admin_notifs',
         'nexdrop_khata_customers',
     ];
-    const settingsDeletes = settingsKeysToDelete.map(k =>
-        db.from('settings').delete().eq('key', k)
-    );
+    const settingsDeletes = [
+        ...settingsKeysToDelete.map(k => db.from('settings').delete().eq('key', k)),
+        ...khataEntryDeleteOps
+    ];
 
     try {
         await Promise.all([...tablesToClear, ...settingsDeletes]);
@@ -8133,10 +8232,9 @@ function displayHomeProducts() {
                 ? `<span style="font-size:1.2rem;font-weight:700;color:#c49a6c;">₹${discPrice}</span>${p.discount>0?`<span style="font-size:0.82rem;text-decoration:line-through;color:#aaa;">₹${numPriceB2B}</span>`:''}`
                 : `<span style="font-size:1rem;font-weight:700;color:#c49a6c;">${p.price||'Contact Us'}</span>`)
             : `<span style="font-size:1.2rem;font-weight:700;color:#c49a6c;">₹${discPrice}</span>${p.discount>0?`<span style="font-size:0.82rem;text-decoration:line-through;color:#aaa;">₹${p.price}</span>`:''}`;
+        // ✅ FIX: B2B/Wholesale par sirf Enquire — Add to Cart nahi
         let actionBtn = isB2B
-            ? (hasNumericB2B && p.inStock
-                ? `<button onclick="addToCart(${p.id},'b2b');showToast('✅ ${p.name} cart mein add hua!','#c49a6c');" style="width:100%;background:linear-gradient(135deg,#c49a6c,#a07840);color:white;border:none;padding:0.6rem;border-radius:40px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;">🛒 Add to Cart</button>`
-                : `<button onclick="openProductModal('b2b',${p.id})" style="width:100%;background:#c49a6c;color:white;border:none;padding:0.6rem;border-radius:40px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;">📦 Enquire →</button>`)
+            ? `<button onclick="openProductModal('b2b',${p.id})" style="width:100%;background:linear-gradient(135deg,#2c5a4a,#1e3f34);color:white;border:none;padding:0.6rem;border-radius:40px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;">📦 View & Enquire</button>`
             : `<button onclick="addToCart(${p.id});showToast('✅ Added to cart!','#2c5a4a');" style="width:100%;background:#2c5a4a;color:white;border:none;padding:0.6rem;border-radius:40px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;display:flex;align-items:center;justify-content:center;gap:0.4rem;">🛒 Add to Cart</button>`;
         html += `
         <div class="product-card" style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.07);border:1px solid #f0ebe4;position:relative;cursor:pointer;" onclick="openProductModal('${item.type}',${p.id})">
@@ -8363,6 +8461,7 @@ function adjustStockV2(prefix, id, delta) {
     el.style.borderColor = newQty === 0 ? '#ff4444' : newQty <= 10 ? '#ff9800' : '#4caf50';
     // Live update dashboard totals
     updateCategoryTotalsLive();
+    if(typeof refreshStockDashboard==='function') refreshStockDashboard();
 }
 
 function liveStockColor(prefix, id) {
@@ -8376,37 +8475,49 @@ function liveStockColor(prefix, id) {
 // Read current input values and update the category totals shown in stock tab header
 function updateCategoryTotalsLive() {
     let rtea=0, wtea=0, rmak=0, wmak=0;
+    let customTotals = {}; // elementId → accumulated qty
+
     [...products].forEach(p => {
         let cat4 = getProductCategory4(p, false);
         let el = document.getElementById('smv2_retail_' + p.id);
         let qty = el ? (parseInt(el.value)||0) : (p.stockQty||0);
-        if(cat4==='retail_tea') rtea+=qty;
-        else if(cat4==='retail_makhana') rmak+=qty;
+        if(cat4==='retail_tea') rtea += qty;
+        else if(cat4==='retail_makhana') rmak += qty;
         else {
-            // custom retail — update its total if element exists
+            // ✅ FIX: accumulate custom retail totals
             let slug = cat4.replace('custom_retail:','').toLowerCase().replace(/\s+/g,'_');
-            let cel = document.getElementById('sm_custom_retail_total_' + slug);
-            // (totals updated in loadStockManager for custom; here just add to overall)
+            let elId = 'sm_custom_retail_total_' + slug;
+            customTotals[elId] = (customTotals[elId]||0) + qty;
         }
     });
     [...b2bProducts].forEach(p => {
         let cat4 = getProductCategory4(p, true);
         let el = document.getElementById('smv2_b2b_' + p.id);
         let qty = el ? (parseInt(el.value)||0) : (p.stockQty||0);
-        if(cat4==='wholesale_tea') wtea+=qty;
-        else if(cat4==='wholesale_makhana') wmak+=qty;
+        if(cat4==='wholesale_tea') wtea += qty;
+        else if(cat4==='wholesale_makhana') wmak += qty;
+        else {
+            // ✅ FIX: accumulate custom b2b totals
+            let slug = cat4.replace('custom_b2b:','').toLowerCase().replace(/\s+/g,'_');
+            let elId = 'sm_custom_b2b_total_' + slug;
+            customTotals[elId] = (customTotals[elId]||0) + qty;
+        }
     });
+
     let setEl = (id,v) => { let e=document.getElementById(id); if(e) e.innerText=v; };
     setEl('sm_rtea_total', rtea);
     setEl('sm_wtea_total', wtea);
     setEl('sm_rmak_total', rmak);
     setEl('sm_wmak_total', wmak);
-    // Total includes custom categories too
+
+    // ✅ FIX: Update each custom section header + compute accurate grand total
     let customTotal = 0;
-    document.querySelectorAll('[id^="sm_custom_retail_total_"],[id^="sm_custom_b2b_total_"]').forEach(el => {
-        customTotal += parseInt(el.innerText)||0;
-    });
-    setEl('sm_total_all', rtea+wtea+rmak+wmak+customTotal);
+    for(let elId in customTotals) {
+        setEl(elId, customTotals[elId]);
+        customTotal += customTotals[elId];
+    }
+    // ✅ FIX: sm_total_all ab stale DOM reads pe depend nahi karta
+    setEl('sm_total_all', rtea + wtea + rmak + wmak + customTotal);
 }
 
 function loadStockManager() {
@@ -8480,10 +8591,11 @@ function loadStockManager() {
         }
     }
 
-    // Update stock summary
-    let inStockCount = products.filter(p => p.inStock).length;
-    let lowStockCount = products.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10 && p.stockQty > 0).length;
-    let outStockCount = products.filter(p => p.stockQty === 0).length;
+    // ✅ FIX: Stock summary — ab B2B/Wholesale products bhi include hote hain
+    let allProds = [...products, ...b2bProducts];
+    let inStockCount = allProds.filter(p => p.inStock).length;
+    let lowStockCount = allProds.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10 && p.stockQty > 0).length;
+    let outStockCount = allProds.filter(p => p.stockQty === 0).length;
     let summaryEl = document.getElementById('stockSummary');
     if(summaryEl) summaryEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.6rem;">
         <div style="background:#e8f5e9;border-radius:10px;padding:0.7rem;text-align:center;"><div style="font-size:1.4rem;font-weight:700;color:#2c5a4a;">${inStockCount}</div><div style="font-size:0.7rem;">✅ In Stock</div></div>
@@ -8561,6 +8673,7 @@ function adjustStock(id, delta) {
     let newQty = Math.max(0, (parseInt(el.value) || 0) + delta);
     el.value = newQty;
     el.style.borderColor = newQty === 0 ? '#ff4444' : newQty <= 10 ? '#ff9800' : '#4caf50';
+    if(typeof refreshStockDashboard==='function') refreshStockDashboard();
 }
 
 // Filter admin products table by category
@@ -8569,11 +8682,13 @@ function filterAdminProducts(cat) {
     _currentAdminPcat = cat;
     document.querySelectorAll('.pcat-tab').forEach(t => t.classList.remove('pcat-active'));
     let activeTab;
-    if(cat.startsWith('custom:')) {
-        let slug = cat.slice(7).toLowerCase().replace(/\s+/g,'_');
-        activeTab = document.getElementById('pcat_custom_' + slug);
+    if(cat.startsWith('custom:') || cat.startsWith('dyncat:')) {
+        let catVal = cat.startsWith('dyncat:') ? cat.slice(7) : cat.slice(7);
+        let slug = catVal.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+        activeTab = document.getElementById('pcat_dyn_' + slug)
+                 || document.getElementById('pcat_custom_' + slug);
     } else {
-        activeTab = document.getElementById('pcat_' + cat);
+        activeTab = document.getElementById('pcat_' + cat) || document.getElementById('pcat_dyn_' + cat);
     }
     if(activeTab) activeTab.classList.add('pcat-active');
     loadAdminProducts();
@@ -8603,20 +8718,26 @@ function filterAdminByCat(catName) {
     }, 300);
 }
 
-function switchToCategory(cat4) {
+// ✅ v36.2: switchToCategory — fully dynamic, hardcoded slugs hataye
+function switchToCategory(catName) {
     switchTab('stock');
     setTimeout(() => {
-        let sectionMap = {
-            retail_tea: 'sm_retail_tea_list',
-            wholesale_tea: 'sm_wholesale_tea_list',
-            retail_makhana: 'sm_retail_makhana_list',
-            wholesale_makhana: 'sm_wholesale_makhana_list'
-        };
-        let targetId = sectionMap[cat4];
-        if(targetId) {
-            let el = document.getElementById(targetId);
-            if(el) el.closest('div[style*="border-radius:14px"]')?.scrollIntoView({behavior:'smooth', block:'start'});
+        // Stock manager mein category section find karke scroll karo
+        // catName can be "retail_tea", "Retail Tea", "retail tea" etc.
+        let normalized = catName.toLowerCase().trim().replace(/_/g,' ');
+        // Try to find a section header containing this category name
+        let allSections = document.querySelectorAll('[data-cat-section]');
+        if(allSections.length) {
+            let target = Array.from(allSections).find(el =>
+                (el.getAttribute('data-cat-section')||'').toLowerCase() === normalized
+            );
+            if(target) { target.scrollIntoView({behavior:'smooth', block:'start'}); return; }
         }
+        // Fallback: find by legacy IDs (sm_retail_tea_list etc.)
+        let legacyId = 'sm_' + catName.toLowerCase().trim().replace(/\s+/g,'_') + '_list';
+        let el = document.getElementById(legacyId);
+        if(el) el.closest('div[style*="border-radius:14px"]')?.scrollIntoView({behavior:'smooth', block:'start'});
+        else if(typeof loadStockManager === 'function') loadStockManager();
     }, 300);
 }
 
@@ -11410,7 +11531,7 @@ function khataRenderLedger(cid) {
             <td style="color:#c62828;font-weight:${e.type==='debit'?'700':'400'};">${e.type==='debit'?'₹'+e.amount.toFixed(2):'—'}</td>
             <td style="color:#2e7d32;font-weight:${e.type==='credit'?'700':'400'};">${e.type==='credit'?'₹'+e.amount.toFixed(2):'—'}</td>
             <td style="font-weight:700;color:${balColor};">₹${Math.abs(runBal).toFixed(2)} ${runBal>0?'(Dr)':runBal<0?'(Cr)':'(Nil)'}</td>
-            <td><button onclick="khataDeleteEntry('${cid}',${i})" style="background:#ff5252;color:white;border:none;padding:0.2rem 0.5rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">🗑️</button></td>
+            <td><button onclick="khataDeleteEntry('${cid}','${e.ts||i}')" style="background:#ff5252;color:white;border:none;padding:0.2rem 0.5rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">🗑️</button></td>
         </tr>`;
     });
     tbody.innerHTML = rows.join('');
@@ -11456,14 +11577,25 @@ window.khataAddEntry = function() {
     khataSaveEntries(cid, entries);
     document.getElementById('khataEntryAmount').value='';
     document.getElementById('khataEntryNote').value='';
+    // ✅ BUG FIX: Date reset nahi hoti thi — aaj ki date reset karo
+    document.getElementById('khataEntryDate').value = new Date().toISOString().split('T')[0];
     khataRenderCustomer(cid);
     khataLoadDropdown();
     showToast('✅ Entry save ho gayi!', type==='debit'?'#c62828':'#2e7d32');
 };
-window.khataDeleteEntry = function(cid, idx) {
+window.khataDeleteEntry = function(cid, tsOrIdx) {
     if(!confirm('Delete this entry?')) return;
     const entries = khataGetEntries(cid);
-    entries.splice(idx, 1);
+    // ✅ BUG FIX: ts-based delete (safe) — index-based was dangerous if array changed
+    const tsKey = String(tsOrIdx);
+    const idx = entries.findIndex(e => String(e.ts) === tsKey);
+    if(idx > -1) {
+        entries.splice(idx, 1);
+    } else {
+        // fallback: numeric index
+        const numIdx = parseInt(tsOrIdx);
+        if(!isNaN(numIdx) && numIdx >= 0 && numIdx < entries.length) entries.splice(numIdx, 1);
+    }
     khataSaveEntries(cid, entries);
     khataRenderCustomer(cid);
     khataLoadDropdown();
@@ -11485,6 +11617,8 @@ window.khataDeleteCustomer = function() {
             if(res && res.error) console.log('Khata entries Supabase delete failed:', res.error.message);
         });
     } catch(e) { console.log('Khata delete Supabase error:', e.message); }
+    // ✅ FIX: Dropdown reset karo warna purana cid selected rehta hai
+    if(sel) sel.value = '';
     document.getElementById('khataCustomerInfo').style.display='none';
     document.getElementById('khataEntryForm').style.display='none';
     document.getElementById('khataLedgerWrap').style.display='none';
@@ -11494,8 +11628,11 @@ window.khataDeleteCustomer = function() {
 };
 window.khataOpenCustomer = function(cid) {
     switchTab('khata');
-    const sel = document.getElementById('khataCustomerSelect');
-    if(sel) { sel.value = cid; khataRenderCustomer(cid); }
+    // ✅ BUG FIX: Race condition fix — dropdown populate hone ke baad cid set karo
+    setTimeout(function() {
+        const sel = document.getElementById('khataCustomerSelect');
+        if(sel) { sel.value = cid; khataRenderCustomer(cid); }
+    }, 150);
 };
 window.khataPrintLedger = function() {
     const sel = document.getElementById('khataCustomerSelect');
@@ -11504,16 +11641,18 @@ window.khataPrintLedger = function() {
     const c = customers.find(x=>x.id===cid);
     const entries = khataGetEntries(cid);
     const b = khataBalance(cid);
+    // ✅ BUG FIX: XSS prevention — escape all user-entered strings in print window
+    const escH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     let rows = '';
     let runBal = 0;
     entries.forEach(e => {
         if(e.type==='debit') runBal+=e.amount; else runBal-=e.amount;
-        rows += `<tr><td>${e.date||'—'}</td><td>${e.note||'—'}</td><td style="color:#c62828;">${e.type==='debit'?'₹'+e.amount.toFixed(2):'—'}</td><td style="color:#2e7d32;">${e.type==='credit'?'₹'+e.amount.toFixed(2):'—'}</td><td style="font-weight:700;">${Math.abs(runBal).toFixed(2)} ${runBal>0?'Dr':runBal<0?'Cr':'Nil'}</td></tr>`;
+        rows += `<tr><td>${escH(e.date)||'—'}</td><td>${escH(e.note)||'—'}</td><td style="color:#c62828;">${e.type==='debit'?'₹'+e.amount.toFixed(2):'—'}</td><td style="color:#2e7d32;">${e.type==='credit'?'₹'+e.amount.toFixed(2):'—'}</td><td style="font-weight:700;">${Math.abs(runBal).toFixed(2)} ${runBal>0?'Dr':runBal<0?'Cr':'Nil'}</td></tr>`;
     });
     const w = window.open('','_blank');
-    w.document.write(`<html><head><title>Khata - ${c?.name||''}</title><style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ddd;padding:6px 8px;}th{background:#f5f5f5;font-weight:600;}h2{color:#c62828;}h3{color:#555;font-weight:400;}</style></head><body>
+    w.document.write(`<html><head><title>Khata - ${escH(c?.name)}</title><style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ddd;padding:6px 8px;}th{background:#f5f5f5;font-weight:600;}h2{color:#c62828;}h3{color:#555;font-weight:400;}</style></head><body>
     <h2>📒 Khata Ledger — Nexdrop Mart</h2>
-    <h3>Customer: <strong>${c?.name||''}</strong> | Phone: ${c?.phone||'—'}</h3>
+    <h3>Customer: <strong>${escH(c?.name)}</strong> | Phone: ${escH(c?.phone)||'—'}</h3>
     <table><thead><tr><th>Date</th><th>Note</th><th>Debit (₹)</th><th>Credit (₹)</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>
     <br><table><tr><td><strong>Total Debit:</strong> ₹${b.debit.toFixed(2)}</td><td><strong>Total Credit:</strong> ₹${b.credit.toFixed(2)}</td><td><strong>Net Balance:</strong> ₹${Math.abs(b.net).toFixed(2)} ${b.net>0?'(Baaki)':b.net<0?'(Advance)':'(Clear)'}</td></tr></table>
     <script>
@@ -11527,21 +11666,17 @@ window.khataWhatsAppSummary = function() {
     const customers = khataGetAll();
     const c = customers.find(x=>x.id===cid);
     const b = khataBalance(cid);
-    const msg = `📒 *Nexdrop Mart — Khata Summary*\n\n👤 *Customer:* ${c?.name||''}\n📞 *Phone:* ${c?.phone||'—'}\n\n💳 Total Debit: ₹${b.debit.toFixed(2)}\n💰 Total Credit: ₹${b.credit.toFixed(2)}\n📊 *Net Balance: ₹${Math.abs(b.net).toFixed(2)} ${b.net>0?'(Aapka Baaki Hai)':b.net<0?'(Advance Hai)':'(Hisaab Clear)'}*\n\nFor any query: +91 9006606697`;
+    const msg = `📒 *Nexdrop Mart — Khata Summary*\n\n👤 *Customer:* ${c?.name||''}\n📞 *Phone:* ${c?.phone||'—'}\n\n💳 Total Debit: ₹${b.debit.toFixed(2)}\n💰 Total Credit: ₹${b.credit.toFixed(2)}\n📊 *Net Balance: ₹${Math.abs(b.net).toFixed(2)} ${b.net>0?'(Aapka Baaki Hai)':b.net<0?'(Advance Hai)':'(Hisaab Clear)'}*\n\nFor any query: ${settings.whatsappNo ? '+91 ' + settings.whatsappNo : ''}`;
     const phone = c?.phone?.replace(/\D/g,'');
-    const url = `https://wa.me/${phone?'91'+phone:''}?text=${encodeURIComponent(msg)}`;
+    // ✅ BUG FIX: Phone nahi hai to WhatsApp blank URL nahi kholega
+    if(!phone || phone.length < 10) {
+        showToast('⚠️ Customer ka phone number nahi hai — WhatsApp nahi bhej sakte!', '#ff9800');
+        return;
+    }
+    const url = `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
     window.open(url,'_blank');
 };
-// Load khata when tab opens
-(function(){
-    const origSwitch = window.switchTab;
-    window.switchTab = function(tab) {
-        origSwitch(tab);
-        if(tab==='khata') {
-            setTimeout(()=>{ khataLoadDropdown(); khataLoadSummary(); }, 50);
-        }
-    };
-})();
+// ✅ BUG FIX: Duplicate switchTab patch removed — khata load handled in main patch block above
 // ==================== END KHATA MANAGEMENT ====================
 // ==================== HERO IMAGE SLIDER ====================
 (function(){
@@ -11927,58 +12062,47 @@ function populateCategoryDropdowns() {
     let b2bSel = document.getElementById('newB2BCat');
     if(b2bSel) { let cur = b2bSel.value; b2bSel.innerHTML = b2bOpts; b2bSel.value = cur; }
 
-    // ── Custom category tabs: Admin product filter ──
+    // ── Admin pcat tabs: Fully Dynamic v36.2 (full rebuild, no duplicates) ──
     let pcatContainer = document.getElementById('pcatTabsContainer');
     if(pcatContainer) {
-        // Remove previously injected custom tabs (not the fixed ones)
-        pcatContainer.querySelectorAll('.pcat-tab-custom').forEach(el => el.remove());
-        // Fixed tabs ke IDs
-        let fixedIds = ['pcat_all','pcat_retail_tea','pcat_wholesale_tea','pcat_retail_makhana','pcat_wholesale_makhana','pcat_b2b'];
-        // Known fixed category values to skip
+        // Remove all dynamic tabs, then re-insert fresh
+        pcatContainer.querySelectorAll('.pcat-tab-dynamic').forEach(el => el.remove());
         let b2bBtn = document.getElementById('pcat_b2b');
-        // Only "Retail X" tabs show karein (Wholesale X skip — B2B tab handles those)
-        let retailCustom = cats.filter(c => c.toLowerCase().startsWith('retail ') &&
-            !['retail tea','retail makhana'].includes(c.toLowerCase()));
-        retailCustom.forEach(c => {
-            let slug = c.toLowerCase().trim().replace(/\s+/g,'_');
-            let btnId = 'pcat_custom_' + slug;
-            if(document.getElementById(btnId)) return;
+        cats.forEach(c => {
             let btn = document.createElement('button');
-            btn.id = btnId;
-            btn.className = 'pcat-tab pcat-tab-custom';
-            let baseName = c.replace(/^Retail\s+/i,'').trim();
-            btn.textContent = '🏷️ ' + baseName;
-            btn.onclick = function(){ filterAdminProducts('custom:' + c); };
+            let lower = c.toLowerCase();
+            let emoji = lower.includes('tea')||lower.includes('chai') ? (lower.startsWith('retail') ? '☕' : '🍵')
+                      : lower.includes('makhana') ? '🌾'
+                      : lower.startsWith('wholesale') ? '📦' : '🏷️';
+            let label = c.replace(/^Retail\s+/i,'R: ').replace(/^Wholesale\s+/i,'W: ');
+            btn.className = 'pcat-tab pcat-tab-dynamic';
+            btn.textContent = emoji + ' ' + label;
+            btn.onclick = (function(cat){ return function(){ filterAdminProducts('dyncat:' + cat); }; })(c);
             if(b2bBtn) pcatContainer.insertBefore(btn, b2bBtn);
             else pcatContainer.appendChild(btn);
         });
     }
 
-    // ── Dynamic tabs: Public shop filter (v38 — fixed v39) ──
-    // ✅ FIX: Settings categories use karo (not raw product categories)
+    // ── Dynamic tabs: Public shop filter (v36.2 — full rebuild, no duplicates) ──
     let hpContainer = document.getElementById('hpTabsContainer');
     if(hpContainer) {
+        // Remove ALL previously added dynamic tabs (full rebuild)
         hpContainer.querySelectorAll('.hp-tab:not(#hpTab_all)').forEach(el => el.remove());
-        // ✅ Sirf settings se defined categories use karo — products ke raw category field se nahi
         let settingsCats = (window._nexdropCatsCache && window._nexdropCatsCache.length)
             ? window._nexdropCatsCache
             : (typeof getCategories === 'function' ? getCategories() : []);
         settingsCats.forEach(c => {
-            let slug = 'dyncat_' + c.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
-            let btnId = 'hpTab_' + slug;
-            if(document.getElementById(btnId)) return;
             let btn = document.createElement('button');
-            btn.id = btnId;
-            btn.className = 'hp-tab hp-tab-dynamic';
             let lower = c.toLowerCase();
             let emoji = lower.startsWith('wholesale') ? '📦' : lower.startsWith('retail') ? '🛒' : '🏷️';
+            btn.className = 'hp-tab hp-tab-dynamic';
             btn.textContent = emoji + ' ' + c;
-            btn.onclick = function(){ filterHomeProducts('dyncat:' + c); };
+            btn.onclick = (function(cat){ return function(){ filterHomeProducts('dyncat:' + cat); }; })(c);
             hpContainer.appendChild(btn);
         });
     }
 
-    // ── Dynamic tabs: B2B / Wholesale section (v38) ──
+    // ── Dynamic tabs: B2B / Wholesale section (v36.2 — full rebuild) ──
     let b2bContainer = document.getElementById('b2bTabsContainer');
     if(b2bContainer) {
         b2bContainer.querySelectorAll('.hp-tab:not(#b2bTab_all)').forEach(el => el.remove());
@@ -11986,17 +12110,31 @@ function populateCategoryDropdowns() {
             (typeof b2bProducts !== 'undefined' ? b2bProducts : [])
                 .map(p => p.category).filter(Boolean)
         )].sort().forEach(c => {
-            let slug = 'b2bdyn_' + c.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
-            let btnId = 'b2bTab_' + slug;
-            if(document.getElementById(btnId)) return;
             let btn = document.createElement('button');
-            btn.id = btnId;
             btn.className = 'hp-tab hp-tab-dynamic';
             let lower = c.toLowerCase();
             let emoji = lower.includes('makhana') ? '🌾' : (lower.includes('tea') || lower.includes('chai')) ? '🍵' : '📦';
             btn.textContent = emoji + ' ' + c;
-            btn.onclick = function(){ filterB2BProducts(c); };
+            btn.onclick = (function(cat){ return function(){ filterB2BProducts(cat); }; })(c);
             b2bContainer.appendChild(btn);
+        });
+    }
+
+    // ── Dynamic tabs: Retail section (custom categories auto-add) ──
+    let retailContainer = document.getElementById('retailTabsContainer');
+    if(retailContainer) {
+        // Static tabs ke alawa sab hata do
+        retailContainer.querySelectorAll('.hp-tab-dynamic').forEach(el => el.remove());
+        let customRetailCats = (typeof getCategories === 'function' ? getCategories() : [])
+            .filter(c => c.toLowerCase().startsWith('retail ') && !['retail tea','retail makhana'].includes(c.toLowerCase()));
+        customRetailCats.sort().forEach(c => {
+            let btn = document.createElement('button');
+            btn.className = 'hp-tab hp-tab-dynamic';
+            let lower = c.toLowerCase();
+            let emoji = lower.includes('tea') || lower.includes('chai') ? '☕' : lower.includes('makhana') ? '🌾' : '🏷️';
+            btn.textContent = emoji + ' ' + c.replace(/^Retail\s+/i,'');
+            btn.onclick = (function(cat){ return function(){ filterRetailProducts('dyncat:' + cat); }; })(c);
+            retailContainer.appendChild(btn);
         });
     }
 }
@@ -12067,28 +12205,31 @@ function loadCouponsList() {
                 </div>
             </div>
             <div style="display:flex;gap:0.3rem;">
-                <button onclick="toggleCouponStatus(${i})" style="background:${c.active?'#ff9800':'#4caf50'};color:white;border:none;padding:0.25rem 0.6rem;border-radius:6px;font-size:0.65rem;cursor:pointer;font-weight:600;">${c.active?'⏸️ Disable':'▶️ Enable'}</button>
-                <button onclick="deleteCoupon(${i})" style="background:#ff4444;color:white;border:none;padding:0.25rem 0.5rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">🗑️</button>
+                <button onclick="toggleCouponStatus('${c.code}')" style="background:${c.active?'#ff9800':'#4caf50'};color:white;border:none;padding:0.25rem 0.6rem;border-radius:6px;font-size:0.65rem;cursor:pointer;font-weight:600;">${c.active?'⏸️ Disable':'▶️ Enable'}</button>
+                <button onclick="deleteCoupon('${c.code}')" style="background:#ff4444;color:white;border:none;padding:0.25rem 0.5rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">🗑️</button>
             </div>
         </div>`;
     }).join('');
 }
 
-function toggleCouponStatus(i) {
+function toggleCouponStatus(code) {
     let coupons = getCoupons();
-    if(!coupons[i]) return;
-    coupons[i].active = !coupons[i].active;
+    // ✅ FIX: index ke bajaye code se find karo (async reload se index shift ho sakta tha)
+    let c = coupons.find(x => x.code === code);
+    if(!c) return;
+    c.active = !c.active;
     saveCoupons(coupons);
     loadCouponsList();
-    showToast(coupons[i].active ? '✅ Coupon enabled!' : '⏸️ Coupon disabled!', '#c2185b');
+    showToast(c.active ? '✅ Coupon enabled!' : '⏸️ Coupon disabled!', '#c2185b');
 }
-function deleteCoupon(i) {
+function deleteCoupon(code) {
     if(!confirm('Delete this coupon?')) return;
     let coupons = getCoupons();
-    let removed = coupons[i];
-    coupons.splice(i, 1);
-    saveCoupons(coupons);
-    // ✅ FIX: Supabase coupons table se bhi delete karo
+    // ✅ FIX: index ke bajaye code se remove karo
+    const removed = coupons.find(c => c.code === code);
+    const updated = coupons.filter(c => c.code !== code);
+    saveCoupons(updated);
+    // Supabase coupons table se bhi delete karo
     if(removed && removed.code) {
         try {
             db.from('coupons').delete().eq('code', removed.code)
@@ -12209,7 +12350,7 @@ function loadAnalytics(days) {
                 let pct = Math.round((data.rev/maxRev)*100);
                 return `<div style="margin-bottom:0.5rem;">
                     <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:2px;">
-                        <span style="font-weight:600;color:#1a2a1a;">${name}</span>
+                        <span style="font-weight:600;color:#1a2a1a;">${esc(name)}</span>
                         <span style="color:#3f51b5;font-weight:700;">₹${data.rev.toLocaleString('en-IN')} (${data.qty} units)</span>
                     </div>
                     <div style="background:#e8eaf6;border-radius:20px;height:8px;overflow:hidden;">
@@ -12829,6 +12970,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if(name === 'reviews') setTimeout(loadAdminReviews, 100);
             if(name === 'reports') setTimeout(function(){ loadPnLStatement(); }, 150);
             if(name === 'gst') setTimeout(function(){ gstPopulateYears(); gstSetPeriodMode(_gstPeriodMode || 'monthly'); }, 100);
+            if(name === 'khata') setTimeout(function(){ if(typeof khataLoadSummary==='function') khataLoadSummary(); if(typeof khataLoadDropdown==='function') khataLoadDropdown(); }, 100);
         };
     }
     // Update notif bell when admin panel opens
@@ -13473,12 +13615,12 @@ async function openDistributorDashboard() {
         document.getElementById('distDashOrders').innerHTML = orders.map(o => `
             <div style="border:1px solid #eee;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.3rem;">
                 <div>
-                    <div style="font-weight:700;color:#2c5a4a;font-size:0.85rem;">#${o.id} — ${o.name || o.customer_name || 'Order'}</div>
-                    <div style="font-size:0.72rem;color:#888;">${o.date || o.created_at || ''}</div>
+                    <div style="font-weight:700;color:#2c5a4a;font-size:0.85rem;">#${o.id} — ${esc(o.name || o.customer_name || 'Order')}</div>
+                    <div style="font-size:0.72rem;color:#888;">${esc(String(o.date || o.created_at || ''))}</div>
                 </div>
                 <div style="text-align:right;">
                     <div style="font-weight:700;color:#c49a6c;">₹${o.total || o.amount || 0}</div>
-                    <div style="font-size:0.7rem;padding:2px 8px;border-radius:20px;background:#f0f0f0;color:#555;">${o.status || 'N/A'}</div>
+                    <div style="font-size:0.7rem;padding:2px 8px;border-radius:20px;background:#f0f0f0;color:#555;">${esc(o.status || 'N/A')}</div>
                 </div>
             </div>`).join('');
     }
@@ -13819,7 +13961,7 @@ function distOnProductChange() {
     const p = (window.products || []).find(x => String(x.id) === String(sel.value));
     if (p) {
         infoEl.style.display = 'block';
-        infoEl.innerHTML = `<b>${p.name}</b> — ₹${p.price} per unit ${p.minQty > 1 ? '| Min Qty: ' + p.minQty : ''} ${p.stockQty ? '| Stock: ' + p.stockQty : ''}`;
+        infoEl.innerHTML = `<b>${esc(p.name)}</b> — ₹${p.price} per unit ${p.minQty > 1 ? '| Min Qty: ' + p.minQty : ''} ${p.stockQty ? '| Stock: ' + p.stockQty : ''}`;
     }
 }
 
@@ -13867,13 +14009,40 @@ function distRenderCart() {
         <span>📦 ${_distCart.length} item(s) · Est. Total</span><span style="color:#c49a6c;">₹${grandTotal}</span></div>`;
 }
 
-function distPlaceOrder() {
+async function distPlaceOrder() {
     if (!currentDistributor) return;
     if (!_distCart.length) { showToast('⚠️ Koi product add nahi kiya!', '#e67e22'); return; }
     const note = document.getElementById('distOrderNote').value.trim();
     const addr = document.getElementById('distOrderAddress').value.trim();
     const itemLines = _distCart.map(c => `  • ${c.name} × ${c.qty} = ₹${c.price * c.qty}`).join('\n');
     const grandTotal = _distCart.reduce((s, c) => s + c.price * c.qty, 0);
+
+    // ✅ FIX: Order ko orders[] aur Supabase mein save karo
+    const newOrder = {
+        id: Date.now(),
+        name: currentDistributor.name,
+        phone: currentDistributor.phone,
+        email: currentDistributor.email,
+        address: addr || (currentDistributor.city + ', ' + currentDistributor.state),
+        items: _distCart.map(c => ({ id: c.id, name: c.name, qty: c.qty, price: c.price, type: c.type || 'retail' })),
+        total: grandTotal,
+        status: 'pending',
+        paymentMethod: 'Distributor Order',
+        note: note || '',
+        orderType: 'distributor',
+        distributorEmail: currentDistributor.email,
+        date: new Date().toISOString(),
+        created_at: new Date().toISOString()
+    };
+    try {
+        orders = orders || [];
+        orders.unshift(newOrder);
+        saveOrders();
+        await sbSaveOrder(newOrder);
+    } catch(e) {
+        console.error('[distPlaceOrder] Supabase save failed:', e);
+    }
+
     const msg = `🏭 *DISTRIBUTOR ORDER — Nexdrop Mart*\n━━━━━━━━━━━━━━━━\n👤 *Distributor:* ${currentDistributor.name}\n🏢 *Business:* ${currentDistributor.business_name || 'N/A'}\n📱 *Phone:* ${currentDistributor.phone}\n📧 *Email:* ${currentDistributor.email}\n🏙️ *Location:* ${currentDistributor.city}, ${currentDistributor.state}\n\n📦 *Order Items:*\n${itemLines}\n\n💰 *Est. Total: ₹${grandTotal}*\n${addr ? '📍 *Delivery:* ' + addr : ''}${note ? '\n💬 *Note:* ' + note : ''}\n━━━━━━━━━━━━━━━━\nPlease confirm availability and pricing.`;
     const waNo = (window.settings && window.settings.whatsappNo) ? window.settings.whatsappNo : '919006606697';
     window.open('https://wa.me/' + waNo + '?text=' + encodeURIComponent(msg), '_blank');
@@ -13881,7 +14050,7 @@ function distPlaceOrder() {
     distRenderCart();
     document.getElementById('distOrderNote').value = '';
     document.getElementById('distOrderAddress').value = '';
-    showToast('📲 Order WhatsApp pe bheja gaya!', '#2c5a4a');
+    showToast('📲 Order WhatsApp pe bheja gaya aur save ho gaya!', '#2c5a4a');
 }
 
 // ── ANALYTICS ──
