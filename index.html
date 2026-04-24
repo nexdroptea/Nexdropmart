@@ -324,11 +324,11 @@ async function sbLoadProducts() {
                 priceUnit: p.price_unit || ''
             }));
             console.log('✅ ' + products.length + ' products Supabase se load hue!');
+            // ✅ FIX: Render home grid immediately as soon as products arrive from Supabase
+            if(typeof displayHomeProducts === 'function') displayHomeProducts();
         }
     } catch(e) {
-        console.log('Supabase products load skipped, using localStorage cache:', e.message);
-        // products in-memory
-        if(p) products = JSON.parse(p);
+        console.log('Supabase products load skipped:', e.message);
     }
 }
 
@@ -936,7 +936,7 @@ async function initSupabase() {
             .from('settings')
             .select('value')
             .eq('key', 'admin_credentials')
-            .maybeSingle(); // ✅ FIX: .single() → .maybeSingle() (row missing pe throw nahi hoga)
+            .maybeSingle(); // ✅ FIX: .single() → .maybeSingle()
         if (!adminCredErr && adminCred && adminCred.value) {
             let creds = typeof adminCred.value === 'string'
                 ? JSON.parse(adminCred.value)
@@ -2569,7 +2569,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <!-- Forgot Password Form -->
   <div id="forgotPassForm" style="display:none;">
     <p style="font-size:0.85rem;color:#c49a6c;font-weight:600;margin-bottom:0.5rem;">🔑 Password Reset</p>
-    <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.6rem;">Apna registered Email aur Phone number dono enter karein verification ke liye</p>
+    <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.6rem;">Please enter your registered Email and Phone number for verification.</p>
     <input type="email" id="fpEmail" placeholder="Registered Email Address *" style="margin-bottom:0.5rem;">
     <input type="tel" id="fpPhone" placeholder="Registered Mobile Number (10 digits) *" style="margin-bottom:0.5rem;" maxlength="10">
     <input type="password" id="fpNewPass" placeholder="New Password *" style="margin-bottom:0.3rem;">
@@ -2946,7 +2946,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <div id="distTabContent_order" style="display:none;">
       <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
         <h4 style="margin:0 0 0.4rem;color:#2c5a4a;font-size:0.95rem;">🛒 Place Wholesale Order</h4>
-        <p style="font-size:0.75rem;color:#888;margin-bottom:0.8rem;">Multiple products add karein, phir WhatsApp se order bhejein.</p>
+        <p style="font-size:0.75rem;color:#888;margin-bottom:0.8rem;">Add multiple products, then send your order via WhatsApp.</p>
 
         <!-- Add Product Row -->
         <div style="background:#f5f9f7;border-radius:12px;padding:0.8rem;margin-bottom:0.8rem;border:1px dashed #c49a6c;">
@@ -2977,7 +2977,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <div id="distOrderSummary" style="display:none;background:#f5f9f7;border-radius:10px;padding:0.8rem;margin-bottom:0.8rem;font-size:0.82rem;"></div>
 
         <button onclick="distPlaceOrder()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;border:none;padding:0.75rem;width:100%;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;">📲 Send Order via WhatsApp</button>
-        <p style="font-size:0.7rem;color:#aaa;text-align:center;margin-top:0.5rem;">Order WhatsApp par jayega, admin confirm karega</p>
+        <p style="font-size:0.7rem;color:#aaa;text-align:center;margin-top:0.5rem;">Order will be sent via WhatsApp. Admin will confirm shortly.</p>
       </div>
     </div>
 
@@ -3014,7 +3014,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
       <!-- Business Documents Upload -->
       <div style="background:white;border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
         <h4 style="margin:0 0 0.3rem;color:#2c5a4a;font-size:0.95rem;">📎 Business Documents</h4>
-        <p style="font-size:0.72rem;color:#888;margin:0 0 0.8rem;">GST certificate, PAN, trade license upload karein.</p>
+        <p style="font-size:0.72rem;color:#888;margin:0 0 0.8rem;">Please upload your GST certificate, PAN, and trade license.</p>
         <div id="distDocsList" style="margin-bottom:0.8rem;"></div>
         <div style="border:2px dashed #c49a6c;border-radius:12px;padding:1rem;text-align:center;cursor:pointer;background:#fffdf9;" onclick="document.getElementById('distDocInput').click()">
           <div style="font-size:1.5rem;">📁</div>
@@ -3648,7 +3648,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <span style="font-size:1.4rem;flex-shrink:0;">🔐</span>
   <div style="flex:1;font-size:0.75rem;color:#e65100;">
     <strong>Supabase RLS (Row Level Security) — Important Setup Reminder</strong><br>
-    Apne Supabase dashboard mein <strong>products, orders, users, bills, coupons, settings</strong> tables par RLS policies enable karein — warna koi bhi aapka data read/write kar sakta hai.<br>
+    Enable RLS policies on <strong>products, orders, users, bills, coupons, settings</strong> tables in your Supabase dashboard — otherwise anyone can read/write your data.<br>
     <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" style="color:#1565c0;font-weight:600;">📖 Supabase RLS Guide →</a>
   </div>
   <button onclick="document.getElementById('rlsWarningBanner').style.display='none';localStorage.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
@@ -3658,11 +3658,11 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <div class="admin-stats">
 <div class="stat-card"><div class="stat-number" id="statProducts">0</div><div>Products</div></div>
 <div class="stat-card"><div class="stat-number" id="statOrders">0</div><div>Total Orders</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:1px solid #a5d6a7;cursor:pointer;" onclick="switchTab('orders');setTodayFilter();" title="Today orders dekhein"><div class="stat-number" id="statTodayOrders" style="font-size:1.5rem;color:#2c5a4a;">0</div><div>Today Orders</div></div>
+<div class="stat-card" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:1px solid #a5d6a7;cursor:pointer;" onclick="switchTab('orders');setTodayFilter();" title="View today's orders"><div class="stat-number" id="statTodayOrders" style="font-size:1.5rem;color:#2c5a4a;">0</div><div>Today Orders</div></div>
 <div class="stat-card"><div class="stat-number" id="statTotalSales" style="font-size:1.3rem;">₹0</div><div>Total Sales</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border:1px solid #90caf9;cursor:pointer;" onclick="switchTab('orders');setTodayFilter();" title="Today sales dekhein"><div class="stat-number" id="statTodaySales" style="font-size:1.3rem;color:#1565c0;">₹0</div><div>Today Sales</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#f3e5f5,#e1bee7);border:1px solid #ce93d8;cursor:pointer;" onclick="switchTab('gst');" title="GST Collection dekhein"><div class="stat-number" id="statTotalGST" style="font-size:1.3rem;color:#7b1fa2;">₹0</div><div>💰 GST Collected</div></div>
-<div class="stat-card" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:1px solid #a5d6a7;cursor:pointer;" onclick="switchTab('gst');setGSTTodayFilter();" title="Today GST dekhein"><div class="stat-number" id="statTodayGST" style="font-size:1.3rem;color:#388e3c;">₹0</div><div>💰 Today GST</div></div>
+<div class="stat-card" style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border:1px solid #90caf9;cursor:pointer;" onclick="switchTab('orders');setTodayFilter();" title="View today's sales"><div class="stat-number" id="statTodaySales" style="font-size:1.3rem;color:#1565c0;">₹0</div><div>Today Sales</div></div>
+<div class="stat-card" style="background:linear-gradient(135deg,#f3e5f5,#e1bee7);border:1px solid #ce93d8;cursor:pointer;" onclick="switchTab('gst');" title="View GST collection"><div class="stat-number" id="statTotalGST" style="font-size:1.3rem;color:#7b1fa2;">₹0</div><div>💰 GST Collected</div></div>
+<div class="stat-card" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:1px solid #a5d6a7;cursor:pointer;" onclick="switchTab('gst');setGSTTodayFilter();" title="View today's GST"><div class="stat-number" id="statTodayGST" style="font-size:1.3rem;color:#388e3c;">₹0</div><div>💰 Today GST</div></div>
 <div class="stat-card"><div class="stat-number" id="statUsers">0</div><div>Users</div></div>
 <div class="stat-card"><div class="stat-number" id="statEnquiries">0</div><div>Enquiries</div></div>
 <div class="stat-card" style="background:linear-gradient(135deg,#fce4ec,#f8bbd9);border:1px solid #f48fb1;"><div class="stat-number" id="statPending" style="font-size:1.5rem;color:#c62828;">0</div><div>⏳ Pending</div></div>
@@ -3911,7 +3911,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <h4 style="color:#2c5a4a;margin-bottom:0.8rem;">➕ Add New Product</h4>
   <div class="add-form-grid">
     <input type="text" id="newName" placeholder="Product Name *">
-    <select id="newCategory" style="padding:0.4rem;font-size:0.75rem;border:1px solid #ddd;border-radius:8px;background:white;color:#333;" title="Category select karein">
+    <select id="newCategory" style="padding:0.4rem;font-size:0.75rem;border:1px solid #ddd;border-radius:8px;background:white;color:#333;" title="Select a category">
       <option value="">-- Category --</option>
     </select>
     <input type="number" id="newPrice" placeholder="Price (₹) *">
@@ -4075,10 +4075,22 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <div style="margin-top:0.6rem;background:#fff3e0;border:1px dashed #c49a6c;border-radius:10px;padding:0.6rem;">
     <label style="font-size:0.82rem;font-weight:700;color:#c49a6c;display:block;margin-bottom:4px;">📷 Product Photo (Optional):</label>
     <input type="file" id="newB2BPhoto" accept="image/*" style="font-size:0.8rem;">
-    <div style="font-size:0.68rem;color:#888;margin-top:3px;">Photo nahi hai toh emoji icon use hoga 🏭</div>
+    <div style="font-size:0.68rem;color:#888;margin-top:3px;">If no photo is uploaded, an emoji icon will be used 🏭</div>
   </div>
   <button class="save-btn" onclick="addB2BProduct()" style="margin-top:0.6rem;width:100%;background:#c49a6c;">+ Add B2B Product</button>
 </div>
+<!-- B2B Category Filter Tabs — same as retail pcatTabsContainer -->
+<div id="b2bAdminCatTabsContainer" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.8rem;padding:0.5rem;background:#fff8f0;border-radius:12px;border:1px solid #f0c88a;">
+  <strong style="font-size:0.75rem;color:#c49a6c;align-self:center;margin-right:0.2rem;">📂 Category:</strong>
+  <button id="b2bpcat_all" class="b2bpcat-tab b2bpcat-active" onclick="filterAdminB2B('all')">🏭 All B2B</button>
+  <!-- Dynamic wholesale category tabs yahan inject hote hain populateCategoryDropdowns() se -->
+  <span id="b2bAdminCatCount" style="font-size:0.72rem;color:#c49a6c;font-weight:700;align-self:center;margin-left:auto;"></span>
+</div>
+<style>
+.b2bpcat-tab{padding:0.3rem 0.75rem;border:1.5px solid #f0c88a;background:white;border-radius:20px;cursor:pointer;font-weight:600;font-size:0.72rem;color:#6b5e4a;transition:all 0.2s;}
+.b2bpcat-tab:hover{border-color:#c49a6c;color:#c49a6c;}
+.b2bpcat-tab.b2bpcat-active{background:#c49a6c;color:white;border-color:#c49a6c;}
+</style>
 <div class="admin-table-wrapper"><table class="admin-table"><thead><tr><th>Image/Icon</th><th>Name</th><th>Category</th><th>Price</th><th>Disc%</th><th>Disc. Price</th><th>Min Qty</th><th>📦 Stock</th><th style="min-width:220px;">Description & Highlights ✏️</th><th>HSN Code</th><th>GST %</th><th>Active</th><th>Action</th></tr></thead><tbody id="adminB2BList"></tbody></table></div>
 <button class="save-btn" onclick="saveAllB2B()" style="background:#c49a6c;margin-top:0.5rem;">💾 Save B2B</button>
 </div>
@@ -4153,7 +4165,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
           <input type="checkbox" id="pbStockUpdate" checked style="width:16px;height:16px;cursor:pointer;accent-color:#2c5a4a;">
           <div>
             <div style="font-size:0.78rem;font-weight:700;color:#2c5a4a;">📦 Stock Auto-Update</div>
-            <div style="font-size:0.65rem;color:#666;">Bill save hone par selected products ka stock automatically plus ho jayega</div>
+            <div style="font-size:0.65rem;color:#666;">Stock of selected products will be automatically updated when the bill is saved.</div>
           </div>
           <select id="pbStockType" style="margin-left:auto;padding:0.3rem;border:1px solid #a5d6a7;border-radius:8px;font-size:0.72rem;">
             <option value="retail">🛒 Retail Stock</option>
@@ -4241,7 +4253,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <h4 style="color:#2c5a4a;margin:0;">🧾 Wholesale / B2B Manual Invoice</h4>
         <button onclick="wiLoadFromCart()" id="wiLoadCartBtn" style="background:linear-gradient(135deg,#c49a6c,#a07840);color:white;border:none;padding:0.35rem 0.9rem;border-radius:20px;font-size:0.75rem;font-weight:700;cursor:pointer;display:none;">🛒 Load from Wholesale Cart</button>
       </div>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:1rem;">Wholesale customer ke liye manually invoice create karein. Bill save hoga aur print/WhatsApp bhi kar sakte hain.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:1rem;">Manually create an invoice for a wholesale customer. Bills can be saved and printed or shared via WhatsApp.</p>
 
       <!-- Customer Info -->
       <div style="background:white;border-radius:12px;padding:0.9rem;margin-bottom:0.8rem;border:1px solid #c8e6c9;">
@@ -4390,7 +4402,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <h4 style="color:#c49a6c;">📋 Saved Wholesale Invoices</h4>
         <button onclick="wiLoadSaved()" style="background:#c49a6c;color:white;border:none;padding:0.3rem 0.8rem;border-radius:20px;font-size:0.72rem;cursor:pointer;">🔄 Refresh</button>
       </div>
-      <div id="wiSavedList" style="font-size:0.8rem;color:#999;text-align:center;padding:1rem;">— Koi saved invoice nahi —</div>
+      <div id="wiSavedList" style="font-size:0.8rem;color:#999;text-align:center;padding:1rem;">— No saved invoices yet —</div>
     </div>
   </div>
 </div>
@@ -4400,7 +4412,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <div style="max-width:900px;">
     <div style="background:linear-gradient(135deg,#fff5f5,#ffebee);border-radius:16px;padding:1.2rem;border:1px solid #ef9a9a;margin-bottom:1rem;">
       <h4 style="color:#c62828;margin-bottom:0.3rem;">📒 Wholesale Customer Khata (Debit / Credit Ledger)</h4>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:1rem;">Wholesale customers ka udhaar (debit) aur payment (credit) track karein. Balance dekhein aur entry add karein.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:1rem;">Track debit and payment (credit) entries for wholesale customers. View balances and add new transactions.</p>
 
       <!-- Add/Select Customer -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.8rem;">
@@ -4487,7 +4499,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <!-- All Customers Summary -->
     <div style="background:#fff8f0;border-radius:16px;padding:1.2rem;border:1px solid #f0c88a;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.7rem;flex-wrap:wrap;gap:0.3rem;">
-        <h4 style="color:#c49a6c;margin:0;">📊 Sabhi Customers ka Summary</h4>
+        <h4 style="color:#c49a6c;margin:0;">📊 All Customers Summary</h4>
         <input type="text" id="khataSearchBox" oninput="khataLoadSummary()" placeholder="🔍 Customer name search..." style="padding:0.35rem 0.7rem;border:1px solid #f0c88a;border-radius:20px;font-size:0.75rem;width:180px;">
       </div>
       <div class="admin-table-wrapper">
@@ -4515,7 +4527,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <div style="max-width:600px;">
     <div style="background:#f0fff4;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #c8e6c9;">
       <h4 style="margin-bottom:0.5rem;color:#2c5a4a;">📢 WhatsApp Broadcast Message</h4>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:1rem;">Sabhi registered users ko ek saath WhatsApp message bhejein. Ek-ek karke link khulega.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:1rem;">Send a WhatsApp message to all registered users at once. Links will open one by one.</p>
       <label style="font-size:0.8rem;font-weight:600;color:#6b5e4a;">📝 Template Select Karein</label>
       <select id="brcmTemplate" onchange="applyBRCMTemplate()" style="width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:8px;margin-bottom:0.7rem;font-size:0.82rem;">
         <option value="">-- Template Select Karein --</option>
@@ -4524,7 +4536,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <option value="festive">🪔 Festival Greetings</option>
         <option value="custom">✏️ Custom Message</option>
       </select>
-      <label style="font-size:0.8rem;font-weight:600;color:#6b5e4a;">💬 Message (Edit kar sakte hain)</label>
+      <label style="font-size:0.8rem;font-weight:600;color:#6b5e4a;">💬 Message (You may edit before sending)</label>
       <textarea id="brcmMessage" rows="6" placeholder="Apna broadcast message yahan likhein..." style="width:100%;padding:0.6rem;border:1px solid #ddd;border-radius:8px;margin-bottom:0.7rem;font-family:inherit;font-size:0.82rem;resize:vertical;"></textarea>
       <label style="font-size:0.8rem;font-weight:600;color:#6b5e4a;">👥 Recipients Select Karein</label>
       <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;flex-wrap:wrap;align-items:center;">
@@ -4552,7 +4564,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <div id="tab-gst" class="tab-content">
   <div style="background:#f3e5f5;border-radius:14px;padding:1rem;margin-bottom:1rem;border:1px solid #ce93d8;">
     <h4 style="color:#7b1fa2;margin-bottom:0.5rem;">&#x1F4B0; GST Collection Report</h4>
-    <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Retail aur Wholesale dono ke GST alag-alag dekhein, download karein.</p>
+    <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">View and download separate GST reports for Retail and Wholesale.</p>
 
     <!-- Type Toggle -->
     <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem;">
@@ -4646,7 +4658,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <div id="tab-reports" class="tab-content">
   <div style="background:#e8f0fe;border-radius:14px;padding:1rem;margin-bottom:1rem;border:1px solid #90caf9;">
     <h4 style="color:#1565c0;margin-bottom:0.5rem;">&#x1F4CA; Sales Reports &amp; Bill Archive</h4>
-    <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Retail aur Wholesale bills alag-alag dekhein, search karein, download karein.</p>
+    <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">View, search, and download Retail and Wholesale bills separately.</p>
 
     <!-- Type Toggle -->
     <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
@@ -4741,7 +4753,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <!-- ✅ NEW: Category Management -->
     <div style="background:#e8f5e9;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #a5d6a7;">
       <h4 style="margin-bottom:0.8rem;color:#2c5a4a;">🏷️ Category Management</h4>
-      <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Product categories manage karein. Yeh categories Add Product form mein show hongi.</p>
+      <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Manage product categories. These categories will appear in the Add Product form.</p>
       <div id="categoryTagsList" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.5rem;min-height:30px;"></div>
       <div style="display:flex;gap:0.4rem;">
         <input type="text" id="newCategoryInput" placeholder="New Category (e.g. Makhana, Tea, Gift)" style="flex:1;padding:0.4rem 0.6rem;border:1px solid #a5d6a7;border-radius:8px;font-size:0.78rem;">
@@ -4791,7 +4803,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <!-- ✅ DATA EXPORT SECTION -->
     <div style="background:#e8f5e9;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #a5d6a7;">
       <h4 style="margin-bottom:0.5rem;color:#2c5a4a;">📤 Data Export — Full Backup</h4>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Apna poora data ek JSON file mein backup karo.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Back up your entire data to a single JSON file.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.7rem;">
         <button onclick="exportAllData()" style="padding:0.55rem;background:#2c5a4a;color:white;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:0.8rem;">📦 Full Backup</button>
         <button onclick="exportProductsOnly()" style="padding:0.55rem;background:#1565c0;color:white;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:0.8rem;">🛒 Products</button>
@@ -4804,7 +4816,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <!-- ✅ DATA IMPORT SECTION -->
     <div style="background:#e8f0fe;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #90caf9;">
       <h4 style="margin-bottom:0.5rem;color:#1565c0;">📥 Data Import — Restore Backup</h4>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Pehle export ki hui JSON file select karo.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Select the previously exported JSON backup file.</p>
       <div style="margin-bottom:0.6rem;">
         <label style="font-size:0.78rem;font-weight:600;color:#6b5e4a;">📁 JSON Backup File Select Karo:</label>
         <input type="file" id="importFileInput" accept=".json" onchange="previewImport(event)" style="width:100%;padding:0.4rem;border:1px solid #90caf9;border-radius:8px;margin-top:0.3rem;font-size:0.78rem;background:white;">
@@ -4822,7 +4834,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 
     <div style="background:#fff0f8;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #ffccee;">
       <h4 style="margin-bottom:0.5rem;color:#cc3366;">🗑️ Data Reset</h4>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Testing ka data clear karo — Orders, Users, Bills, Enquiries, Sellers, Distributors, Coupons reset ho jayenge. Products safe rahenge, stock zero ho jayega.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Clear test data — Orders, Users, Bills, Enquiries, Sellers, Distributors, and Coupons will be reset. Products will be preserved; stock will be set to zero.</p>
       <button onclick="clearAllTestData()" style="width:100%;padding:0.6rem;background:#cc3366;color:white;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:0.9rem;">🗑️ Reset All Test Data (Supabase + Cache)</button>
     </div>
     <div style="background:#e8f5e9;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #a5d6a7;">
@@ -4889,7 +4901,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 
     <div style="background:#e8f0fe;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #90caf9;">
       <h4 style="margin-bottom:0.8rem;color:#1565c0;">📏 Unit Management</h4>
-      <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Retail aur Wholesale ke liye alag-alag units set karein. Yeh units invoice aur purchase bill mein use hongi.</p>
+      <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Set separate units for Retail and Wholesale. These units will be used in invoices and purchase bills.</p>
 
       <!-- Retail Units -->
       <div style="background:#e8f5e9;border-radius:10px;padding:0.7rem;margin-bottom:0.7rem;border:1px solid #a5d6a7;">
@@ -4982,7 +4994,7 @@ function loadData() {
     });
 }
 function resetProductImages() {
-    if(!confirm('⚠️ Kya aap sabhi products ki images default par reset karna chahte hain?\nAdmin se upload ki gayi images bhi hat jayengi!')) return;
+    if(!confirm('⚠️ Are you sure you want to reset all product images to default?\nImages uploaded from the admin panel will also be removed!')) return;
     for(let p of products) {
         if(defaultProductImages[p.id]) {
             p.imageType = 'upload';
@@ -5484,7 +5496,7 @@ function displayB2B() {
     // Agar koi bhi product nahi mila in selected categories
     if(!html) {
         html = `<div style="text-align:center;padding:2rem;color:#888;font-size:0.9rem;">
-            📦 Is category mein abhi koi wholesale product nahi hai
+            📦 No wholesale products available in this category yet
         </div>`;
     }
 
@@ -5858,7 +5870,7 @@ function renderCart() {
     let finalTotal = subtotal - couponDisc + courier;
     let couponRow = couponDisc > 0 ? `<div style="display:flex;justify-content:space-between;color:#c2185b;font-weight:600;"><span>🎟️ Coupon (${activeCoupon.code}):</span><span>-₹${couponDisc}</span></div>` : (isFreeShip ? `<div style="display:flex;justify-content:space-between;color:#c2185b;font-weight:600;"><span>🎟️ Free Shipping (${activeCoupon.code}):</span><span style="color:green">FREE</span></div>` : '');
     let hasWholesale = cart.some(i => i.isB2B);
-    let wsNote = hasWholesale ? '<div style="font-size:0.68rem;color:#c49a6c;margin-top:0.3rem;font-weight:600;">🏭 Cart mein Wholesale items hain — GST Invoice milegi</div>' : '';
+    let wsNote = hasWholesale ? '<div style="font-size:0.68rem;color:#c49a6c;margin-top:0.3rem;font-weight:600;">🏭 Your cart contains Wholesale items — a GST Invoice will be generated.</div>' : '';
     document.getElementById('cartSummary').innerHTML = `<div style="background:#f5f0ea;padding:0.8rem;border-radius:12px;margin-top:0.5rem;">
         <div style="display:flex;justify-content:space-between;"><span>Subtotal:</span><span>₹${subtotal}</span></div>
         ${couponRow}
@@ -5875,8 +5887,8 @@ function renderCart() {
 }
 function toggleCart() { document.getElementById('cartModal').classList.toggle('active'); renderCart(); }
 async function checkout() {
-    if(cart.length === 0) { showToast('❌ Cart empty hai! Pehle kuch add karein.', '#ff4444'); return; }
-    if(!currentUser) { showToast('❌ Please pehle login karein!', '#ff4444'); openUserPanel(); return; }
+    if(cart.length === 0) { showToast('❌ Your cart is empty! Please add items first.', '#ff4444'); return; }
+    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0; // ✅ FIX: empty cart -Infinity guard
     // Coupon discount apply karo
@@ -5927,7 +5939,7 @@ async function checkout() {
 // ==================== UPI PAY MODAL ====================
 function openUPIPayModal() {
     // ✅ FIX 1: Cart empty check pehle karo
-    if(cart.length === 0) { showToast('❌ Cart is empty! Pehle kuch add karein.', '#ff4444'); return; }
+    if(cart.length === 0) { showToast('❌ Cart is empty! Please add items first.', '#ff4444'); return; }
     // ✅ FIX 2: Login check — bina login ke UPI modal nahi khulegа
     if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
 
@@ -6033,7 +6045,7 @@ function buyNow(productId) {
     // Step 2: Find product
     let p = products.find(pr => pr.id === productId);
     if (!p) { showToast('❌ Product not found!', '#ff4444'); return; }
-    if (!p.inStock) { showToast('❌ Product out of stock hai!', '#ff4444'); return; }
+    if (!p.inStock) { showToast('❌ This product is currently out of stock!', '#ff4444'); return; }
 
     // Step 3: Calculate price (same as cart)
     let discPrice = Math.round(p.price - p.price * (p.discount || 0) / 100);
@@ -6323,10 +6335,10 @@ async function doForgotPassword() {
     // ✅ FIX 1: Saari validations pehle
     if(!email || !email.includes('@')) { setMsg('❌ Valid email address dalein!', '#ff4444'); return; }
     if(!phone || phone.length < 10) { setMsg('❌ Valid 10-digit mobile number dalein!', '#ff4444'); return; }
-    if(!newPass) { setMsg('❌ New password enter karein!', '#ff4444'); return; }
+    if(!newPass) { setMsg('❌ Please enter a new password!', '#ff4444'); return; }
     let passRegex = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*]).{8,}$/;
     if(!passRegex.test(newPass)) { setMsg('❌ Password weak hai! Min 8 chars, 1 Capital, 1 Number, 1 Special (!@#$%^&*) zaroori hai.', '#ff4444'); return; }
-    if(newPass !== confPass) { setMsg('❌ Dono passwords match nahi karte!', '#ff4444'); return; }
+    if(newPass !== confPass) { setMsg('❌ Passwords do not match!', '#ff4444'); return; }
 
     setMsg('⏳ Verifying... please wait', '#888');
 
@@ -6348,7 +6360,7 @@ async function doForgotPassword() {
     }
 
     // User not found
-    if(!user) { setMsg('❌ Yeh email registered nahi hai! Pehle account banayein.', '#ff4444'); return; }
+    if(!user) { setMsg('❌ This email is not registered! Please create an account first.', '#ff4444'); return; }
 
     // Phone verification
     let storedPhone = (user.phone || '').replace(/\D/g,'');
@@ -6356,7 +6368,7 @@ async function doForgotPassword() {
     let enteredLast10 = phone.slice(-10);
     let storedLast10 = storedPhone.slice(-10);
     if(storedLast10 !== enteredLast10) {
-        setMsg('❌ Phone number match nahi karta! Apna registered mobile number enter karein.', '#ff4444');
+        setMsg('❌ Phone number does not match! Please enter your registered mobile number.', '#ff4444');
         return;
     }
 
@@ -6373,13 +6385,13 @@ async function doForgotPassword() {
     }
 
     // ✅ FIX 6: Success — fields clear karo aur login par bhejo
-    setMsg('✅ Password successfully reset! Ab login karein.', '#2c5a4a');
+    setMsg('✅ Password successfully reset! You can now login.', '#2c5a4a');
     ['fpEmail','fpPhone','fpNewPass','fpConfPass'].forEach(id => {
         let el = document.getElementById(id); if(el) el.value = '';
     });
     setTimeout(() => {
         clearAndShowLogin();
-        showToast('✅ Password reset ho gaya! Login karein.', '#2c5a4a');
+        showToast('✅ Password reset successful! Please login.', '#2c5a4a');
     }, 2000);
 }
 function showSignupForm() {
@@ -6466,7 +6478,7 @@ function userRegister() {
     // Phone duplicate check
     let phoneClean = phone.replace(/\D/g,'');
     let phoneExisting = users.find(u => u.phone && u.phone.replace(/\D/g,'') === phoneClean);
-    if(phoneExisting) { showToast('❌ Yeh mobile number already registered hai! Doosra number use karein.', '#ff4444'); return; }
+    if(phoneExisting) { showToast('❌ This mobile number is already registered! Please use a different number.', '#ff4444'); return; }
     // 🔒 FIX #4: newUser object mein plaintext password NAHI — _newPassword flag use karo
     let newUser = { name, email, phone, address, gstin, stateCode, orders: [], loyaltyPoints: 0, registeredAt: new Date().toISOString() };
     // _newPassword is a transient flag — sbSaveUser reads it, hashes it, then deletes it
@@ -6781,13 +6793,13 @@ const _adminLoginGuard = (function() {
 async function adminLogin() {
     // 🔒 Brute force check
     if (_adminLoginGuard.isLocked()) {
-        showToast('⛔ Too many failed attempts! ' + _adminLoginGuard.secondsLeft() + ' seconds baad try karein.', '#c62828');
+        showToast('⛔ Too many failed attempts! Please try again in ' + _adminLoginGuard.secondsLeft() + ' seconds.', '#c62828');
         return;
     }
 
     let u = document.getElementById('adminUser').value.trim();
     let p = document.getElementById('adminPass').value;
-    if (!u || !p) { showToast('⚠️ Username aur password dono zaroori hain!', '#e67e22'); return; }
+    if (!u || !p) { showToast('⚠️ Both username and password are required!', '#e67e22'); return; }
 
     // 🔒 Direct Supabase se verify karo — memory mein password nahi rakha jaata
     let verified = false;
@@ -6826,7 +6838,7 @@ async function adminLogin() {
     } catch(e) {
         // 🔒 Supabase offline hone par bhi login DENY — no insecure fallback
         /* SECURITY: console.log('Supabase admin credential fetch error:', e.message) */;
-        showToast('⚠️ Server se connect nahi ho saka. Internet check karein aur dobara try karein.', '#e67e22');
+        showToast('⚠️ Could not connect to server. Please check your internet connection and try again.', '#e67e22');
         return;
     }
 
@@ -6841,7 +6853,7 @@ async function adminLogin() {
     } else {
         _adminLoginGuard.recordFail();
         let remaining = 5 - /* approximate */ 1; // guard tracks internally
-        showToast('❌ Invalid credentials! Username ya password galat hai.', '#c62828');
+        showToast('❌ Invalid credentials! Incorrect username or password.', '#c62828');
         document.getElementById('adminPass').value = '';
     }
 }
@@ -6921,7 +6933,7 @@ function loadAdminProducts() {
                         📷 Main
                         <input type="file" accept="image/*" style="display:none;" onchange="uploadAdminPhoto(${p.id}, this)">
                     </label>
-                    <label style="background:#c49a6c;color:white;padding:3px 6px;border-radius:6px;cursor:pointer;font-size:0.6rem;white-space:nowrap;margin-top:1px;" title="Multiple extra images add karein (max 5)">
+                    <label style="background:#c49a6c;color:white;padding:3px 6px;border-radius:6px;cursor:pointer;font-size:0.6rem;white-space:nowrap;margin-top:1px;" title="Add extra product images (max 5)">
                         🖼️ +More
                         <input type="file" accept="image/*" multiple style="display:none;" onchange="uploadExtraPhoto('retail',${p.id}, this)">
                     </label>
@@ -7055,7 +7067,7 @@ function uploadAdminPhoto(id, input) {
                 showToast('✅ Photo uploaded!');
             }
         };
-        img.onerror = function() { showToast('❌ Image load nahi ho saki. Please try again.', '#ff4444'); loadAdminProducts(); };
+        img.onerror = function() { showToast('❌ Image could not be loaded. Please try again.', '#ff4444'); loadAdminProducts(); };
         img.src = e.target.result;
     };
     reader.readAsDataURL(file);
@@ -7204,9 +7216,32 @@ function updateB2BDiscPrice(id) {
     }
 }
 
+let _currentAdminB2BCat = 'all'; // ✅ NEW: B2B admin tab filter state
+
+function filterAdminB2B(cat) {
+    _currentAdminB2BCat = cat;
+    // Tab active state update
+    document.querySelectorAll('.b2bpcat-tab').forEach(t => t.classList.remove('b2bpcat-active'));
+    let slug = cat === 'all' ? 'all' : cat.replace('dyncat:','').toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+    let activeBtn = cat === 'all'
+        ? document.getElementById('b2bpcat_all')
+        : document.querySelector('.b2bpcat-tab-dynamic[data-cat="' + cat.replace('dyncat:','') + '"]');
+    if(activeBtn) activeBtn.classList.add('b2bpcat-active');
+    loadAdminB2B();
+}
+
 function loadAdminB2B() {
+    // ✅ Filter by selected category
+    let filtered = b2bProducts;
+    if(_currentAdminB2BCat && _currentAdminB2BCat !== 'all') {
+        let catVal = _currentAdminB2BCat.startsWith('dyncat:') ? _currentAdminB2BCat.slice(7) : _currentAdminB2BCat;
+        filtered = b2bProducts.filter(p => (p.category||'').toLowerCase().trim() === catVal.toLowerCase().trim());
+    }
+    // Update count label
+    let countLabel = document.getElementById('b2bAdminCatCount');
+    if(countLabel) countLabel.textContent = b2bProducts.length + ' products';
     let html = '';
-    for(let p of b2bProducts) {
+    for(let p of filtered) {
         let imgHtml = p.imageType==='upload' && p.imageValue
             ? `<img src="${p.imageValue}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;display:block;">`
             : `<div style="width:60px;height:60px;background:#fff3e0;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:2rem;">${p.icon}</div>`;
@@ -7218,7 +7253,7 @@ function loadAdminB2B() {
                         📷 Main
                         <input type="file" accept="image/*" style="display:none;" onchange="uploadB2BPhoto(${p.id}, this)">
                     </label>
-                    <label style="background:#2c5a4a;color:white;padding:3px 6px;border-radius:6px;cursor:pointer;font-size:0.6rem;white-space:nowrap;margin-top:1px;" title="Multiple extra images add karein (max 5)">
+                    <label style="background:#2c5a4a;color:white;padding:3px 6px;border-radius:6px;cursor:pointer;font-size:0.6rem;white-space:nowrap;margin-top:1px;" title="Add extra product images (max 5)">
                         🖼️ +More
                         <input type="file" accept="image/*" multiple style="display:none;" onchange="uploadExtraPhoto('b2b',${p.id}, this)">
                     </label>
@@ -7378,7 +7413,7 @@ function updateStatus(id, status) {
     // ── AUTO BILL SEND WHEN CONFIRMED ──
     if(status === 'Confirmed' && prevStatus !== 'Confirmed') {
         saveOrders();
-        showToast('✅ Order Confirmed! Customer ko WhatsApp bheja jayega...', '#2c5a4a');
+        showToast('✅ Order Confirmed! A WhatsApp message will be sent to the customer...', '#2c5a4a');
         setTimeout(() => {
             let phone = (o.customerPhone || '').replace(/\D/g,'');
             if(phone.length === 10) phone = '91' + phone;
@@ -7687,7 +7722,7 @@ function loadAdminUsers() {
             <td style="font-weight:700;color:#c49a6c;">₹${totalSpent.toLocaleString('en-IN')}</td>
         </tr>`;
     }
-    document.getElementById('adminUsersList').innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:#999;padding:1rem;">Koi users nahi hain</td></tr>';
+    document.getElementById('adminUsersList').innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:#999;padding:1rem;">No users found</td></tr>';
 }
 function clearUserFilter() {
     let sb = document.getElementById('userSearchBox'); if(sb) sb.value='';
@@ -7726,7 +7761,7 @@ function loadSettingsForm() {
         if(settings.companyLogo) {
             logoPrev.innerHTML = '<div style="margin-top:0.4rem;"><div style="font-size:0.7rem;color:#2c5a4a;font-weight:600;margin-bottom:3px;">✅ Current Logo:</div><img src="'+settings.companyLogo+'" style="max-width:120px;max-height:60px;object-fit:contain;border:1px solid #ddd;border-radius:8px;padding:4px;background:white;"><button onclick="removeCompanyLogo()" style="display:block;margin-top:4px;background:#ff4444;color:white;border:none;border-radius:6px;padding:2px 10px;font-size:0.68rem;cursor:pointer;">🗑️ Remove Logo</button></div>';
         } else {
-            logoPrev.innerHTML = '<div style="font-size:0.7rem;color:#999;margin-top:3px;">Koi logo upload nahi hua. Bill par 🌾 emoji dikhega.</div>';
+            logoPrev.innerHTML = '<div style="font-size:0.7rem;color:#999;margin-top:3px;">No logo uploaded. The 🌾 emoji will appear on bills.</div>';
         }
     }
     // Payment settings
@@ -7748,7 +7783,7 @@ function loadSettingsForm() {
         if(settings.qrCodeImage) {
             qrPrev.innerHTML = '<img src="' + settings.qrCodeImage + '" style="max-width:150px;border-radius:8px;border:1px solid #ddd;"><button onclick="removeQRCode()" style="display:block;margin-top:4px;background:#ff4444;color:white;border:none;border-radius:6px;padding:2px 10px;font-size:0.68rem;cursor:pointer;">🗑️ Remove QR</button>';
         } else {
-            qrPrev.innerHTML = '<div style="font-size:0.7rem;color:#999;margin-top:3px;">Koi QR code upload nahi hua.</div>';
+            qrPrev.innerHTML = '<div style="font-size:0.7rem;color:#999;margin-top:3px;">No QR code uploaded.</div>';
         }
     }
     // Load unit management
@@ -7919,12 +7954,12 @@ function showPassMsg(text, color) {
 async function clearAllTestData() {
     if(!confirm(
         '⚠️ RESET TEST DATA\n\n' +
-        'Yeh saab delete ho jayega:\n' +
+        'The following will be permanently deleted:\n' +
         '• Orders\n• Users\n• Bulk Enquiries\n• Bills\n' +
         '• Coupons\n• Sellers\n• Dealership Enquiries\n• Distributors\n' +
-        '• Settings reset\n• Stock zero ho jayega (products/b2b)\n\n' +
-        'Products ke naam/images/prices safe rahenge.\n\n' +
-        'Confirm karo?'
+        '• Settings reset\n• Stock will be set to zero (products/b2b)\n\n' +
+        'Product names, images, and prices will be preserved.\n\n' +
+        'Are you sure?'
     )) return;
 
     showToast('⏳ Resetting...', '#ff9800');
@@ -8004,7 +8039,7 @@ async function clearAllTestData() {
     showToast('✅ Saara test data reset ho gaya! Stock bhi zero hua.', '#2c5a4a');
 }
 function adminLogout() {
-    if(confirm('Admin se logout karna chahte hain?')) {
+    if(confirm('Are you sure you want to logout from Admin?')) {
         // 🔒 FIX #1: Session token invalidate karo
         _adminVault.invalidate();
         closeAdminPanel();
@@ -8294,7 +8329,7 @@ function loadBRCMUsers() {
     let allContacts = [];
     users.forEach(u => { if(u.phone) allContacts.push({name:u.name, phone:u.phone, type:"user"}); });
     bulkEnquiries.forEach(e => { if(e.phone && !allContacts.find(c=>c.phone===e.phone)) allContacts.push({name:e.name, phone:e.phone, type:"enquiry"}); });
-    if(allContacts.length === 0) { document.getElementById("brcmUserList").innerHTML = "<p style=\"color:#999;font-size:0.8rem;text-align:center;padding:1rem;\">Koi registered user nahi hai abhi</p>"; updateBRCMCount(); return; }
+    if(allContacts.length === 0) { document.getElementById("brcmUserList").innerHTML = "<p style=\"color:#999;font-size:0.8rem;text-align:center;padding:1rem;\">No registered users found yet</p>"; updateBRCMCount(); return; }
     html = allContacts.map((c,i) => `<div class="brcm-contact"><input type="checkbox" id="brcm_${i}" value="${c.phone}" onchange="updateBRCMCount()" checked><label for="brcm_${i}">${c.name} <span style="background:${c.type==="user"?"#e8f5e9":"#fff3e0"};color:${c.type==="user"?"#2c5a4a":"#c49a6c"};padding:1px 5px;border-radius:8px;font-size:0.62rem;">${c.type==="user"?"👤 User":"🏭 Enquiry"}</span></label><span class="brcm-phone">📞 ${c.phone}</span></div>`).join("");
     document.getElementById("brcmUserList").innerHTML = html;
     updateBRCMCount();
@@ -8319,17 +8354,17 @@ function applyBRCMTemplate() {
 }
 function sendBRCM() {
     let msg = document.getElementById("brcmMessage").value.trim();
-    if(!msg) { showToast('❌ Message likhein pehle!', '#ff4444'); return; }
+    if(!msg) { showToast('❌ Please write a message first!', '#ff4444'); return; }
     let selected = [...document.querySelectorAll("#brcmUserList input[type=checkbox]:checked")].map(cb=>cb.value);
-    if(selected.length === 0) { showToast('❌ Koi user select nahi kiya!', '#ff4444'); return; }
+    if(selected.length === 0) { showToast('❌ No users selected!', '#ff4444'); return; }
     // ✅ FIX 3: Pop-up blocker detect karo
     let testWin = window.open('', '_blank');
     if(!testWin || testWin.closed || typeof testWin.closed === 'undefined') {
-        showToast('⚠️ Pop-up blocked! Browser mein pop-ups allow karein aur dobara try karein.', '#e67e22');
+        showToast('⚠️ Pop-up blocked! Please allow pop-ups in your browser and try again.', '#e67e22');
         return;
     }
     testWin.close();
-    if(!confirm(`${selected.length} logo ko WhatsApp message bhejna chahte hain?\n\n📌 Tip: Browser pop-ups allow hone chahiye.\nHar user ka WhatsApp tab ek-ek karke khulega.`)) return;
+    if(!confirm(`${selected.length} users will receive a WhatsApp message.\n\n📌 Tip: Browser pop-ups must be allowed.\nEach user's WhatsApp tab will open one by one.`)) return;
     let i = 0;
     function sendNext() {
         if(i >= selected.length) { showToast("✅ Broadcast complete! "+selected.length+" messages bheje gaye."); return; }
@@ -8345,7 +8380,7 @@ function sendBRCMCustom() {
     let phone = document.getElementById("brcmCustomPhone").value.trim().replace(/\D/g,"");
     let msg = document.getElementById("brcmMessage").value.trim();
     if(!phone || phone.length < 10) { showToast('❌ Valid phone number daalen!', '#ff4444'); return; }
-    if(!msg) { showToast('❌ Message likhein pehle!', '#ff4444'); return; }
+    if(!msg) { showToast('❌ Please write a message first!', '#ff4444'); return; }
     if(phone.length === 10) phone = "91" + phone;
     window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(msg), "_blank");
 }
@@ -9119,7 +9154,7 @@ function markBillPaid() {
     // ✅ SECURITY FIX: Sirf admin panel se hi payment mark ho sakti hai
     let isAdmin = document.getElementById('adminPanel') && document.getElementById('adminPanel').classList.contains('active');
     if(!isAdmin) {
-        showToast('❌ Sirf Admin payment status change kar sakta hai!', '#ff4444');
+        showToast('❌ Only Admin can change the payment status!', '#ff4444');
         return;
     }
     let orderId = document.getElementById('billModal').dataset.orderId;
@@ -9299,7 +9334,7 @@ function loadReports() {
     }
     let html = '';
     if(!filtered.length) {
-        html = '<div style="text-align:center;color:#999;padding:2rem;font-size:0.85rem;">Koi bills nahi mile. Orders ship karein toh bill generate hoga automatically.</div>';
+        html = '<div style="text-align:center;color:#999;padding:2rem;font-size:0.85rem;">No bills found. Bills will be generated automatically when orders are shipped.</div>';
     } else {
         filtered.forEach(b => {
             let sc = b.status==='Delivered'?'#4caf50':b.status==='Shipped'?'#2196f3':'#ff9800';
@@ -9352,7 +9387,7 @@ function loadWholesaleReports() {
 
     let listEl = document.getElementById('reportsList');
     if(!listEl) return;
-    if(!filtered.length) { listEl.innerHTML = '<div style="text-align:center;color:#999;padding:2rem;font-size:0.85rem;">Koi wholesale invoices nahi mile is filter mein.</div>'; return; }
+    if(!filtered.length) { listEl.innerHTML = '<div style="text-align:center;color:#999;padding:2rem;font-size:0.85rem;">No wholesale invoices found for the selected filter.</div>'; return; }
 
     let html = filtered.map(b => {
         let total = parseFloat(b.total||0);
@@ -9389,7 +9424,7 @@ function exportReportsCSV() {
         let a=document.createElement('a'); a.href=URL.createObjectURL(blob);
         a.download='nexdrop_wholesale_bills_'+new Date().toLocaleDateString('en-GB').replace(/\//g,'-')+'.csv';
         a.click();
-        showToast('✅ Wholesale Bills CSV download ho raha hai!','#2c5a4a');
+        showToast('✅ Wholesale Bills CSV is downloading!','#2c5a4a');
         return;
     }
     // Retail export (original)
@@ -9404,7 +9439,7 @@ function exportReportsCSV() {
     let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = 'nexdrop_retail_bills_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.csv';
     a.click();
-    showToast('✅ Retail Bills CSV download ho raha hai!','#2c5a4a');
+    showToast('✅ Retail Bills CSV is downloading!','#2c5a4a');
 }
 function reSendBillWA(orderId) {
     let o = orders.find(o => o.id === orderId);
@@ -9617,28 +9652,28 @@ function exportAllData() {
     let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = 'nexdrop_full_backup_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json';
     a.click();
-    showToast('✅ Full backup download ho raha hai!', '#2c5a4a');
+    showToast('✅ Full backup is downloading!', '#2c5a4a');
 }
 function exportProductsOnly() {
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'products', data: { products, b2bProducts } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
     let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = 'nexdrop_products_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json'; a.click();
-    showToast('✅ Products JSON export ho raha hai!', '#1565c0');
+    showToast('✅ Products JSON is exporting!', '#1565c0');
 }
 function exportOrdersOnly() {
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'orders', data: { orders, bills } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
     let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = 'nexdrop_orders_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json'; a.click();
-    showToast('✅ Orders JSON export ho raha hai!', '#ff9800');
+    showToast('✅ Orders JSON is exporting!', '#ff9800');
 }
 function exportUsersOnly() {
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'users', data: { users } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
     let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = 'nexdrop_users_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json'; a.click();
-    showToast('✅ Users JSON export ho raha hai!', '#7b1fa2');
+    showToast('✅ Users JSON is exporting!', '#7b1fa2');
 }
 
 // ---- 8. DATA IMPORT FUNCTIONS ----
@@ -9672,7 +9707,7 @@ function previewImport(event) {
             if(mergeBtn) mergeBtn.style.display = 'block';
             if(replaceBtn) replaceBtn.style.display = 'block';
         } catch(err) {
-            if(previewContent) previewContent.innerHTML = '❌ Invalid file — Nexdrop ka backup file select karo.';
+            if(previewContent) previewContent.innerHTML = '❌ Invalid file — Please select a valid Nexdrop backup file.';
             if(previewEl) previewEl.style.display = 'block';
             if(mergeBtn) mergeBtn.style.display = 'none';
             if(replaceBtn) replaceBtn.style.display = 'none';
@@ -9712,7 +9747,7 @@ function importReplaceData() {
         if(d.bulkEnquiries) { bulkEnquiries = d.bulkEnquiries; saveBulk(); }
         if(d.settings) { settings = {...settings, ...d.settings}; saveSettingsData(); loadSettingsForm(); }
         updateStats(); loadAdminOrders(); loadAdminUsers(); loadAdminProducts(); displayProducts();
-        if(msgEl) { msgEl.style.display='block'; msgEl.style.background='#e8f5e9'; msgEl.style.color='#2c5a4a'; msgEl.innerHTML='✅ Poora data replace ho gaya!'; }
+        if(msgEl) { msgEl.style.display='block'; msgEl.style.background='#e8f5e9'; msgEl.style.color='#2c5a4a'; msgEl.innerHTML='✅ All data has been replaced successfully!'; }
         showToast('✅ Data restored!', '#2c5a4a');
     } catch(err) {
         if(msgEl) { msgEl.style.display='block'; msgEl.style.background='#ffebee'; msgEl.style.color='#c62828'; msgEl.textContent='❌ Import fail: ' + err.message; }
@@ -9721,10 +9756,15 @@ function importReplaceData() {
 
 // ---- PAGE INIT: Load data and display home products on page load ----
 document.addEventListener('DOMContentLoaded', function() {
-    loadCart(); // ✅ BUG FIX: Restore cart from localStorage on page load
+    loadCart();
+    updateCartCount();
+    // Show b2bProducts immediately (hardcoded) while Supabase loads retail products
+    if(typeof displayHomeProducts === 'function') displayHomeProducts();
+    // Load full data from Supabase — displayHomeProducts() is also called inside initSupabase()
     loadData();
-    displayHomeProducts();
-    updateCartCount(); // reflect restored cart count in UI
+    // Safety fallback: re-render after 2s and 5s in case Supabase takes time
+    setTimeout(function() { if(typeof displayHomeProducts === 'function') displayHomeProducts(); }, 2000);
+    setTimeout(function() { if(typeof displayHomeProducts === 'function') displayHomeProducts(); }, 5000);
 });
 
 // ---- 9. IMAGE LAZY LOADING (IntersectionObserver — NO localStorage) ----
@@ -9872,7 +9912,7 @@ function printGSTReport() {
     let compName = (settings && settings.companyName) ? settings.companyName : 'Nexdrop Mart';
     let gstin = (settings && settings.gstin) ? settings.gstin : '10AAJCN9076F1ZF';
     let tableEl = document.getElementById('gstMainTable');
-    if(!tableEl) { showToast('GST table nahi mila!','#c62828'); return; }
+    if(!tableEl) { showToast('GST table not found!','#c62828'); return; }
     // Clone table, remove Action column
     let tbl = tableEl.cloneNode(true);
     tbl.querySelectorAll('th:last-child, td:last-child').forEach(el => el.remove());
@@ -10044,7 +10084,7 @@ function loadGSTReport() {
         `<div style="background:#e8eaf6;border-radius:10px;padding:0.6rem;text-align:center;border:1px solid #9fa8da;"><div style="font-size:1rem;font-weight:800;color:#3949ab;">₹${Math.round(totalIGST).toLocaleString('en-IN')}</div><div style="font-size:0.65rem;">IGST (Inter)</div></div>`+
         `<div style="background:#e0f7fa;border-radius:10px;padding:0.6rem;text-align:center;border:1px solid #80deea;"><div style="font-size:1rem;font-weight:800;color:#00838f;">${interCount}</div><div style="font-size:0.65rem;">🌐 Inter-State</div></div>`;
 
-    if(!rows.length) { tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#999;padding:1.5rem;font-size:0.82rem;">Koi records nahi mile is filter mein.</td></tr>`; return; }
+    if(!rows.length) { tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#999;padding:1.5rem;font-size:0.82rem;">No records found for the selected filter.</td></tr>`; return; }
 
     tbody.innerHTML = rows.map(r => {
         let taxCol = r.isInter
@@ -10137,7 +10177,7 @@ function exportGSTCSV() {
     let a = document.createElement('a'); a.href=URL.createObjectURL(blob);
     a.download = 'gst_report_'+(_gstType==='retail'?'retail':'wholesale')+'_'+new Date().toLocaleDateString('en-GB').replace(/\//g,'-')+'.csv';
     a.click();
-    showToast('✅ GST CSV download ho raha hai!','#2c5a4a');
+    showToast('✅ GST CSV is downloading!','#2c5a4a');
 }
 // ==================== END GST REPORT FUNCTIONS ====================
 
@@ -10252,7 +10292,7 @@ function pbLoadSuppliers() {
             suppliers.map(s=>`<option value="${s.id}">${s.name}${s.phone?' ('+s.phone+')':''}</option>`).join('');
         if(cur) sel.value = cur;
     }
-    if(!suppliers.length) { listEl.innerHTML='<div style="text-align:center;color:#999;font-size:0.78rem;padding:0.5rem;">Koi supplier nahi — ऊपर Add karein</div>'; return; }
+    if(!suppliers.length) { listEl.innerHTML='<div style="text-align:center;color:#999;font-size:0.78rem;padding:0.5rem;">No suppliers added yet — Add one above</div>'; return; }
     listEl.innerHTML = suppliers.map(s=>`
         <div style="display:flex;justify-content:space-between;align-items:center;background:white;border-radius:8px;padding:0.5rem 0.7rem;margin-bottom:0.3rem;border:1px solid #e1bee7;font-size:0.78rem;">
             <div>
@@ -10530,7 +10570,7 @@ function pbLoadHistory() {
 
     let el=document.getElementById('pbHistoryList');
     if(!el) return;
-    if(!filtered.length){el.innerHTML='<div style="text-align:center;color:#999;padding:1rem;font-size:0.8rem;">Koi purchase bills nahi mile.</div>';return;}
+    if(!filtered.length){el.innerHTML='<div style="text-align:center;color:#999;padding:1rem;font-size:0.8rem;">No purchase bills found.</div>';return;}
 
     el.innerHTML=filtered.map(b=>{
         let sc=b.status==='Paid'?'#4caf50':b.status==='Partial'?'#ff9800':'#f44336';
@@ -10619,7 +10659,7 @@ function pbUpdateSummary() {
 
 function pbExportCSV() {
     let pbBills=_pbBills;
-    if(!pbBills.length){showToast('⚠️ Koi purchase bills nahi!','#ff9800');return;}
+    if(!pbBills.length){showToast('⚠️ No purchase bills available!','#ff9800');return;}
     let rows=[['Bill ID','Supplier','Supplier Bill No','Date','Payment Mode','Items','Subtotal','GST','Discount','Total','Status','Amount Paid','Balance Due']];
     pbBills.forEach(b=>{
         let items=b.items.map(i=>i.name+' '+i.qty+i.unit+' @₹'+i.rate).join(' | ');
@@ -10633,7 +10673,7 @@ function pbExportCSV() {
     let a=document.createElement('a');a.href=URL.createObjectURL(blob);
     a.download='purchase_bills_'+new Date().toLocaleDateString('en-GB').replace(/\//g,'-')+'.csv';
     a.click();
-    showToast('✅ Purchase Bills CSV download ho raha hai!','#7b1fa2');
+    showToast('✅ Purchase Bills CSV is downloading!','#7b1fa2');
 }
 // ==================== END PURCHASE BILLS MODULE ====================
 
@@ -10755,7 +10795,7 @@ function wiAutoFillStateFromGSTIN() {
         } else {
             // Invalid first 2 chars — not numeric
             gstEl.style.border = '1px solid #e57373'; // red
-            gstEl.title = 'GSTIN ke pehle 2 digits state code hone chahiye (e.g. 10 for Bihar)';
+            gstEl.title = 'The first 2 digits of your GSTIN should be your state code (e.g. 10 for Bihar)';
         }
     }
 
@@ -10880,7 +10920,7 @@ function wiGenerateInvoice() {
     // ✅ FIX v36: Truncation se pehle admin ko toast warning dikhao
     if(wiBills.length > 200) {
         console.warn('[WI Bills] 200 record limit hit — purani invoices truncate ho rahi hain. Dedicated table use karne ki sifarish ki jaati hai.');
-        showToast('⚠️ Wholesale invoices 200 limit pe pahunch gayi — purani entries hata di gayi hain. CSV export kar lein.', '#ff9800');
+        showToast('⚠️ Wholesale invoices have reached the 200-entry limit — older entries have been removed. Please export a CSV backup.', '#ff9800');
         wiBills = wiBills.slice(0, 200);
     }
     _wiBills = wiBills;
@@ -10919,8 +10959,7 @@ function wiGenerateInvoice() {
     // ✅ Khata Auto-Save: Bill generate hote hi khata mein payment mode ke hisaab se entry add karo
     (function() {
         try {
-            let customers = _khataCustomers; // ✅ FIX: [] hardcode tha — ab actual in-memory array use hoga
-
+            let customers = _khataCustomers; // ✅ FIX: [] hardcode tha
             // Customer dhundho ya naya banao (phone se match karo pehle, phir naam se)
             let cid = null;
             let existing = customers.find(c => c.phone && c.phone.replace(/\D/g,'') === d.phone.replace(/\D/g,''));
@@ -10930,7 +10969,7 @@ function wiGenerateInvoice() {
                 cid = existing.id;
             } else {
                 cid = 'kc_' + Date.now();
-                _khataCustomers.push({ id: cid, name: d.customer, phone: d.phone }); // ✅ FIX: customers nahi, _khataCustomers mein push
+                _khataCustomers.push({ id: cid, name: d.customer, phone: d.phone });
                 /* khata customers → Supabase via safeSave */
             }
 
@@ -11545,9 +11584,9 @@ function khataRenderCustomer(cid) {
     document.getElementById('khataInfoPhone').textContent = c.phone || '—';
     document.getElementById('khataInfoBalance').textContent = '₹' + Math.abs(b.net).toFixed(2);
     const statusEl = document.getElementById('khataInfoStatus');
-    if(b.net > 0) { statusEl.textContent = '🔴 Customer ka baaki hai'; statusEl.style.color='#c62828'; document.getElementById('khataInfoBalance').style.color='#c62828'; }
+    if(b.net > 0) { statusEl.textContent = '🔴 Balance Due from Customer'; statusEl.style.color='#c62828'; document.getElementById('khataInfoBalance').style.color='#c62828'; }
     else if(b.net < 0) { statusEl.textContent = '🟢 Aapne zyada le liya (advance)'; statusEl.style.color='#2e7d32'; document.getElementById('khataInfoBalance').style.color='#2e7d32'; }
-    else { statusEl.textContent = '✅ Hisaab barabar hai'; statusEl.style.color='#555'; document.getElementById('khataInfoBalance').style.color='#555'; }
+    else { statusEl.textContent = '✅ Account is Settled'; statusEl.style.color='#555'; document.getElementById('khataInfoBalance').style.color='#555'; }
     document.getElementById('khataCustomerInfo').style.display='block';
     document.getElementById('khataEntryForm').style.display='block';
     document.getElementById('khataLedgerWrap').style.display='block';
@@ -12030,7 +12069,7 @@ function addCategoryTag() {
     let added = [];
     if(!cats.find(c => c.toLowerCase() === retailName.toLowerCase())) { cats.push(retailName); added.push(retailName); }
     if(!cats.find(c => c.toLowerCase() === wholesaleName.toLowerCase())) { cats.push(wholesaleName); added.push(wholesaleName); }
-    if(added.length === 0) { showToast('⚠️ Yeh category pehle se hai!', '#ff9800'); return; }
+    if(added.length === 0) { showToast('⚠️ This category already exists!', '#ff9800'); return; }
     saveCategories(cats);
     if(inp) inp.value = '';
     loadCategoryTagsList();
@@ -12067,7 +12106,7 @@ function inlineAddCategory() {
     if(!cats.find(c => c.toLowerCase() === retailName.toLowerCase())) { cats.push(retailName); added.push(retailName); }
     if(!cats.find(c => c.toLowerCase() === wholesaleName.toLowerCase())) { cats.push(wholesaleName); added.push(wholesaleName); }
     if(added.length === 0) {
-        showToast('⚠️ Yeh category pehle se hai!', '#ff9800');
+        showToast('⚠️ This category already exists!', '#ff9800');
         // Dropdown mein retail version auto-select karo
         let sel = document.getElementById('newCategory');
         if(sel) { for(let o of sel.options) { if(o.value.toLowerCase() === retailName.toLowerCase()) { sel.value = o.value; break; } } }
@@ -12130,6 +12169,33 @@ function populateCategoryDropdowns() {
             if(b2bBtn) pcatContainer.insertBefore(btn, b2bBtn);
             else pcatContainer.appendChild(btn);
         });
+    }
+
+    // ── B2B Admin tab filter tabs: wholesale categories only ──
+    let b2bAdminContainer = document.getElementById('b2bAdminCatTabsContainer');
+    if(b2bAdminContainer) {
+        b2bAdminContainer.querySelectorAll('.b2bpcat-tab-dynamic').forEach(el => el.remove());
+        let countLabel = document.getElementById('b2bAdminCatCount');
+        wholesaleCats.forEach(c => {
+            let btn = document.createElement('button');
+            let lower = c.toLowerCase();
+            let emoji = lower.includes('tea')||lower.includes('chai') ? '🍵'
+                      : lower.includes('makhana') ? '🌾'
+                      : '📦';
+            let label = c.replace(/^Wholesale\s+/i,'W: ');
+            btn.className = 'b2bpcat-tab b2bpcat-tab-dynamic';
+            btn.setAttribute('data-cat', c);
+            btn.textContent = emoji + ' ' + label;
+            btn.onclick = (function(cat){ return function(){ filterAdminB2B('dyncat:' + cat); }; })(c);
+            // Insert before count label
+            if(countLabel) b2bAdminContainer.insertBefore(btn, countLabel);
+            else b2bAdminContainer.appendChild(btn);
+        });
+        // Update count
+        if(countLabel) {
+            let total = (typeof b2bProducts !== 'undefined') ? b2bProducts.length : 0;
+            countLabel.textContent = total ? total + ' products' : '';
+        }
     }
 
     // ── Dynamic tabs: Public shop filter (v36.2 — full rebuild, no duplicates) ──
@@ -12473,7 +12539,7 @@ function loadAnalytics(days) {
             <div style="width:80px;background:#eee;border-radius:20px;height:6px;overflow:hidden;">
                 <div style="width:${Math.round((c/totalCount)*100)}%;background:${colors[s]||'#ccc'};height:100%;border-radius:20px;"></div>
             </div>
-        </div>`).join('') || '<div style="color:#999;font-size:0.78rem;">Koi data nahi</div>';
+        </div>`).join('') || '<div style="color:#999;font-size:0.78rem;">No data available</div>';
 }
 
 // ──────────────────────────────────────────────
@@ -12714,7 +12780,7 @@ function reviewAction(id, action) {
     }
     loadAdminReviews();
     renderHomepageReviews(); // Homepage par turant update karo
-    showToast(action === 'approved' ? '✅ Review approve ho gaya! Homepage par dikh raha hai.' : '✅ Review updated!','#f57f17');
+    showToast(action === 'approved' ? '✅ Review approved! It is now visible on the homepage.' : '✅ Review updated!','#f57f17');
 }
 
 // ✅ Approved reviews homepage par render karo
@@ -12861,7 +12927,7 @@ function renderAddressList() {
     if(!el || !currentUser) return;
     let addrs = getAddresses();
     if(!addrs.length) {
-        el.innerHTML='<div style="font-size:0.75rem;color:#999;text-align:center;padding:0.4rem;">Koi address saved nahi. "+ Add New" dabayein.</div>';
+        el.innerHTML='<div style="font-size:0.75rem;color:#999;text-align:center;padding:0.4rem;">No saved address found. Tap "+ Add New" to add one.</div>';
         return;
     }
     el.innerHTML = addrs.map((a,i)=>`
@@ -13367,21 +13433,21 @@ window.openSliderManager = async function(){
     modal.id = 'sliderManagerModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem;';
     modal.innerHTML = '<div style="background:white;border-radius:20px;padding:1.5rem;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;">'
-        +'<h3 style="margin:0 0 1rem;color:#2c5a4a;font-size:1.1rem;">🖼️ Slider Images Manage करें</h3>'
+        +'<h3 style="margin:0 0 1rem;color:#2c5a4a;font-size:1.1rem;">🖼️ Manage Slider Images</h3>'
         +'<div id="slRowsWrap">'+rows+'</div>'
         +'<div style="margin-top:1rem;">'
-        +'<p style="font-size:0.8rem;color:#6b5e4a;margin-bottom:0.5rem;"><strong>नई Image Add करें:</strong><br>Image URL paste करें या device से upload करें</p>'
-        +'<input type="text" id="slNewUrl" placeholder="Image URL paste करें..." style="width:100%;padding:0.5rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.82rem;margin-bottom:0.4rem;box-sizing:border-box;">'
+        +'<p style="font-size:0.8rem;color:#6b5e4a;margin-bottom:0.5rem;"><strong>Add New Image:</strong><br>Paste an image URL or upload from your device</p>'
+        +'<input type="text" id="slNewUrl" placeholder="Paste image URL..." style="width:100%;padding:0.5rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.82rem;margin-bottom:0.4rem;box-sizing:border-box;">'
         +'<input type="text" id="slNewCap" placeholder="Caption (optional)" style="width:100%;padding:0.5rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.82rem;margin-bottom:0.4rem;box-sizing:border-box;">'
         +'<label style="display:block;margin-bottom:0.5rem;">'
-        +'<span style="display:inline-block;background:#2c5a4a;color:white;padding:0.4rem 1rem;border-radius:20px;font-size:0.8rem;cursor:pointer;">📁 Device से Upload करें</span>'
+        +'<span style="display:inline-block;background:#2c5a4a;color:white;padding:0.4rem 1rem;border-radius:20px;font-size:0.8rem;cursor:pointer;">📁 Upload from Device</span>'
         +'<input type="file" id="slFileInput" accept="image/*" style="display:none;" onchange="handleSliderFileUpload(this)">'
         +'</label>'
         +'<img id="slUploadPreview" src="" style="display:none;width:100%;max-height:120px;object-fit:contain;border-radius:10px;margin-bottom:0.4rem;background:#f0f0f0;">'
         +'<button onclick="addSlide()" style="background:#2c5a4a;color:white;border:none;padding:0.5rem 1.2rem;border-radius:20px;cursor:pointer;font-size:0.85rem;width:100%;">+ Add Slide</button>'
         +'</div>'
         +'<div style="display:flex;gap:0.5rem;margin-top:1rem;">'
-        +'<button onclick="saveSliderChanges()" style="flex:1;background:#c49a6c;color:white;border:none;padding:0.6rem;border-radius:20px;cursor:pointer;font-weight:600;">✅ Save करें</button>'
+        +'<button onclick="saveSliderChanges()" style="flex:1;background:#c49a6c;color:white;border:none;padding:0.6rem;border-radius:20px;cursor:pointer;font-weight:600;">✅ Save Changes</button>'
         +'<button onclick="document.getElementById(&quot;sliderManagerModal&quot;).remove()" style="flex:1;background:#eee;color:#333;border:none;padding:0.6rem;border-radius:20px;cursor:pointer;">Cancel</button>'
         +'</div>'
         +'</div>';
@@ -13612,7 +13678,7 @@ async function distRegister() {
     const saved = await sbDistInsert(row);
     if (saved) {
         closeDistributorSignup();
-        showToast('✅ Registration successful! Admin approval ke baad login kar sakte hain. 📞 +91 9006606697', '#2c5a4a');
+        showToast('✅ Registration successful! You can login after Admin approval. 📞 +91 9006606697', '#2c5a4a');
     } else {
         // 🔒 FIX v36: SQL schema alert se remove kiya — sensitive DB info public nahi honi chahiye
         showToast('❌ Registration failed. Please try again or contact: +91 9006606697', '#ff4444');
@@ -13654,7 +13720,7 @@ const _distLoginGuard = (function() {
 async function distLogin() {
     // 🔒 FIX: Brute force check
     if (_distLoginGuard.isLocked()) {
-        showToast('⛔ Too many failed attempts! ' + _distLoginGuard.secondsLeft() + ' seconds baad try karein.', '#c62828');
+        showToast('⛔ Too many failed attempts! ' + _distLoginGuard.secondsLeft() + ' seconds before trying again.', '#c62828');
         return;
     }
 
@@ -13663,12 +13729,12 @@ async function distLogin() {
     if (!email || !pass) { showToast('⚠️ Email aur password dono fill karo.', '#e67e22'); return; }
 
     const dist = await sbDistGetByEmail(email);
-    if (!dist) { _distLoginGuard.recordFail(); showToast('❌ Yeh email registered nahi hai.', '#c62828'); return; }
+    if (!dist) { _distLoginGuard.recordFail(); showToast('❌ This email is not registered.', '#c62828'); return; }
 
     const hash = await distHash(pass);
     if (dist.password_hash !== hash) {
         _distLoginGuard.recordFail();
-        showToast('❌ Password galat hai.', '#c62828');
+        showToast('❌ Incorrect password.', '#c62828');
         document.getElementById('distLoginPass').value = '';
         return;
     }
@@ -13880,7 +13946,10 @@ async function adminUpdateDistStatus(id, status) {
         adminRenderDistributors();
         showToast(`✅ Status updated to ${status}`, '#2c5a4a');
     } catch(e) { showToast('❌ Error: ' + e.message, '#ff4444'); }
-    if (!confirm('Delete this distributor?')) return;
+}
+
+async function adminDeleteDistributor(id) {
+    if (!confirm('⚠️ Kya aap is distributor ko delete karna chahte hain? Yeh action undo nahi ho sakta!')) return;
     try {
         await db.from('distributors').delete().eq('id', id);
         _adminDistributors = _adminDistributors.filter(x => x.id !== id);
