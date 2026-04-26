@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.9 applied | v36.18.3-upi-fix — UPI Fixes: (1) pdm_upiBtn bank details (accountName/bankAccount/IFSC/bankName) update missing tha — fixed; (2) upiQRImg empty base64 src hata diya — broken image gone, display:none default; (3) QR onerror handler reset on new src; (4) openUPIPayModal QR consistent display logic | v36.18.2-security below -->
+<!-- 🔒 SECURITY PATCH v2.9 applied | v36.18.4-upi-checkout — UPI Flow Fix: (1) UPI button ab sab products ke liye dikhta hai (sirf codAllowed===false tak limited nahi); (2) UPI modal mein "Maine Pay Kar Diya — Order Place Karo" button add kiya; (3) upiCheckout() function — paymentMethod=UPI, paymentStatus=PAID se order place karta hai + WhatsApp message; (4) UPI button label updated | v36.18.3-upi-fix below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -2507,9 +2507,9 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <!-- UPI Pay button — sirf non-COD (Online payment required) items ke liye -->
     <div id="upiPayBtnWrap" style="display:none;margin-top:0.5rem;">
         <button onclick="openUPIPayModal()" style="width:100%;background:linear-gradient(135deg,#1565c0,#0d47a1);color:white;border:none;padding:0.7rem;border-radius:12px;font-weight:700;font-size:0.88rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:0.5rem;">
-            📱 Pay via UPI / QR Code <span style="font-size:0.72rem;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:20px;margin-left:4px;">Required</span>
+            📱 Pay via UPI / QR Code
         </button>
-        <div style="font-size:0.68rem;color:#e53935;text-align:center;margin-top:3px;font-weight:600;">⚠️ This cart contains an item that requires online payment — COD not available</div>
+        <div style="font-size:0.68rem;color:#888;text-align:center;margin-top:3px;">UPI se pay karke order confirm karein</div>
     </div>
 </div>
 
@@ -2574,9 +2574,15 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 
       <!-- After payment instruction -->
       <div style="background:#fff3e0;border-radius:10px;padding:0.6rem 0.8rem;font-size:0.72rem;color:#795548;border-left:3px solid #ff9800;">
-        ✅ After payment, <strong>send the screenshot on WhatsApp</strong> for faster order processing.<br>
-        <a onclick="sendPaymentScreenshotWhatsApp()" href="#" style="color:#ff5722;font-weight:700;display:inline-block;margin-top:4px;">📤 Send on WhatsApp →</a>
+        ✅ Payment ke baad, <strong>neeche button dabao</strong> — order place hoga aur screenshot WhatsApp pe jaayega.<br>
+        <a onclick="sendPaymentScreenshotWhatsApp()" href="#" style="color:#ff5722;font-weight:700;display:inline-block;margin-top:4px;">📤 Sirf Screenshot Send Karein →</a>
       </div>
+
+      <!-- Place Order after UPI payment -->
+      <button onclick="upiCheckout()" style="width:100%;margin-top:0.8rem;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:white;border:none;padding:0.9rem;border-radius:14px;font-weight:800;font-size:1rem;cursor:pointer;letter-spacing:0.3px;">
+        ✅ Maine Pay Kar Diya — Order Place Karo
+      </button>
+      <div style="font-size:0.65rem;color:#888;text-align:center;margin-top:4px;">Order place hoga + WhatsApp confirmation milega</div>
     </div>
   </div>
 </div>
@@ -6044,10 +6050,11 @@ function renderCart() {
         ${subtotal < settings.freeMin && !isFreeShip ? '<div style="font-size:0.7rem;color:#ff9800;margin-top:0.4rem;">Add ₹'+(settings.freeMin-subtotal)+' more for Free Delivery!</div>' : ''}
         ${wsNote}
     </div>`;
-    // UPI button: sirf tab show karo jab cart mein koi non-COD (codAllowed===false) item ho
+    // UPI button: sab logged-in users ke liye dikhao (COD ke saath additional option)
     let hasNonCOD = cart.some(i => { let p = products.find(pr => pr.id === i.id && !i.isB2B); return p && p.codAllowed === false; });
     let upiWrap = document.getElementById('upiPayBtnWrap');
-    if(upiWrap) upiWrap.style.display = hasNonCOD ? 'block' : 'none';
+    // 🔒 FIX: UPI button sirf codAllowed===false tak limit tha — ab sab ke liye dikhao
+    if(upiWrap) upiWrap.style.display = (cart.length > 0 && currentUser) ? 'block' : 'none';
 }
 function toggleCart() { document.getElementById('cartModal').classList.toggle('active'); renderCart(); }
 async function checkout() {
@@ -6107,6 +6114,79 @@ async function checkout() {
 }
 
 // ==================== UPI PAY MODAL ====================
+// ==================== UPI CHECKOUT ====================
+async function upiCheckout() {
+    if(cart.length === 0) { showToast('❌ Cart empty hai!', '#ff4444'); return; }
+    if(!currentUser) { showToast('❌ Pehle login karein!', '#ff4444'); openUserPanel(); return; }
+
+    // Close UPI modal
+    document.getElementById('upiPayModal').style.display = 'none';
+    document.body.style.overflow = '';
+
+    let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
+    let maxCourier = cart.length ? Math.max(...cart.map(i => i.courierCharge||0)) : 0;
+    let couponDiscount = 0;
+    let isFreeShipping = activeCoupon && activeCoupon.type === 'free_shipping';
+    if(activeCoupon) {
+        if(activeCoupon.type === 'flat') couponDiscount = Math.min(activeCoupon.value, subtotal);
+        else if(activeCoupon.type === 'percent') couponDiscount = Math.round(subtotal * activeCoupon.value / 100);
+    }
+    let courier = (subtotal >= (settings.freeMin||999) || isFreeShipping) ? 0 : maxCourier;
+    let total = subtotal - couponDiscount + courier;
+    if(total < 0) total = 0;
+
+    let orderId = genOrderId();
+    let hasWholesale = cart.some(i => i.isB2B);
+    let hasRetail = cart.some(i => !i.isB2B);
+    let orderType = (hasWholesale && hasRetail) ? 'mixed' : hasWholesale ? 'wholesale' : 'retail';
+
+    let order = {
+        id: orderId,
+        customerName: currentUser.name,
+        customerPhone: currentUser.phone,
+        customerAddress: currentUser.address,
+        userId: currentUser.email,
+        items: cart.map(i => {
+            let prodRef = products.find(pr => pr.id === i.id) || b2bProducts.find(pr => pr.id === i.id);
+            return { productId: i.id, name: i.name, quantity: i.quantity, price: i.price, isWholesale: i.isB2B||false, gstSlab: (prodRef && prodRef.gstSlab != null) ? prodRef.gstSlab : 5 };
+        }),
+        total: total,
+        courier: courier,
+        status: 'Pending',
+        paymentMethod: 'UPI',
+        paymentStatus: 'PAID',
+        orderType: orderType,
+        date: new Date().toLocaleString(),
+        couponCode: activeCoupon ? activeCoupon.code : '',
+        discountAmount: couponDiscount || 0,
+        customerGstin: (currentUser && currentUser.gstin) ? currentUser.gstin : '',
+        customerStateCode: (currentUser && currentUser.stateCode) ? currentUser.stateCode : '',
+        customerStateName: (currentUser && currentUser.stateName) ? currentUser.stateName : ''
+    };
+
+    orders.unshift(order);
+    try {
+        await sbSaveOrder(order);
+    } catch(e) {
+        console.error('[upiCheckout] Supabase save failed:', e);
+        showToast('⚠️ Order saved locally (server sync pending)', '#e67e22');
+    }
+
+    if(activeCoupon) { try { sbIncrementCoupon(activeCoupon.code); } catch(e){} activeCoupon = null; }
+    updateStats();
+
+    // WhatsApp message
+    let itemLines = cart.map(i => (i.isB2B?'[W] ':'')+i.name + ' x ' + i.quantity + ' = ₹' + (i.price * i.quantity)).join('\n');
+    let couponLine = couponDiscount > 0 ? '\nCoupon Discount: -₹' + couponDiscount : (isFreeShipping ? '\nCoupon: Free Shipping' : '');
+    let message = '*' + (settings.companyName||'Nexdrop Mart') + ' - New Order #' + orderId + '*\n💳 UPI Payment\n\n*Customer Details:*\nName: ' + currentUser.name + '\nPhone: ' + currentUser.phone + '\nAddress: ' + currentUser.address + '\n\n*Order Items:*\n' + itemLines + '\n\nSubtotal: ₹' + subtotal + couponLine + '\nCourier: ' + (courier === 0 ? 'FREE' : '₹'+courier) + '\n*Total: ₹' + total + '*\n\n✅ Payment: UPI (Customer ne payment confirm ki)\nDate: ' + new Date().toLocaleString();
+
+    cart = []; saveCart(); updateCartCount(); renderCart(); toggleCart();
+    showToast('✅ Order #' + orderId + ' placed! WhatsApp pe confirm ho raha hai...', '#2c5a4a');
+    window.open('https://wa.me/' + (settings.whatsappNo || '919006606697') + '?text=' + encodeURIComponent(message), '_blank');
+    setTimeout(() => sendPaymentDetailsToCustomer(orderId, total, currentUser.phone, 'UPI'), 1200);
+}
+// ==================== END UPI CHECKOUT ====================
+
 function openUPIPayModal() {
     // ✅ FIX 1: Cart empty check pehle karo
     if(cart.length === 0) { showToast('❌ Cart is empty! Please add items first.', '#ff4444'); return; }
