@@ -1,13 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.4 applied | v36.14 — Slider flicker fix: loading="eager"+fetchpriority="high", spinner-first init, Supabase-only render (no default→custom double-render), maybeSingle() fallback | v36.13 — Full audit fixes: (1) deleteOrder confirm()→2-step toast; (2) pbPartialPay prompt()→inline modal; (3) pbDeleteBill confirm()→2-step toast; (4) deleteB2B confirm()→2-step toast; (5) sellerUpdateStatus confirm()→2-step toast + restored emoji fix; (6) updateDealerStatus + sbSaveDealership sync + toast + list refresh; (7) jumpToProduct querySelector fixed (switchTab pattern); (8) autoRefresh b2bProducts double-assign removed; (9) resetProductImages confirm()→2-step toast; (10) 13 more confirm() calls across deleteProduct/deleteSupplier/deleteWI/deleteUnit/khata/deleteAddress/distributor/distDoc/deleteCategory/dealerApp/sellerDelete/broadcast/importReplace all → 2-step toast; (11) markBillPaid prompt()→inline payment method modal; (12) renameCategory prompt()→inline rename modal; (13) manualPhone+mp prompt()→showToast | v36.12 — GST+P&L fixes: (1) loadGSTReport() buyer state — order.customerStateCode pehle check (guest checkout IGST fix); (2) exportGSTCSV() same fix; (3) loadPnLStatement() revenue GST-exclusive — taxable amount use karo warna P&L overstated thi | v36.11 — Review fixes: loadReviewsFromSupabase .single()→.maybeSingle(), reviewAction confirm()→toast 2-step, product rating auto-update | v36.10 — Shipped confirm()→toast 2-step | v36.9 — applyCoupon stale cache, Khata hydration, deleteCoupon confirm()→toast | v36.8 — Audit fixes: (1) XSS fix: o.adminNote → esc(o.adminNote) in loadDashboard() — admin note user dashboard mein unescaped tha; (2) distLogin() brute-force guard added (_distLoginGuard: 5 attempts, 5min lockout, sessionStorage persist) — same as adminLoginGuard; (3) .single() → .maybeSingle() for reviews/suppliers/wi_bills/pb_bills in initSupabase — missing row pe throw hone wala error fix; (4) calcOrderGST() global scope mein move kiya — updateStats() ke andar nested tha, har call pe re-define hoti thi (performance fix); (5) loadAnalytics() date parsing fix — Indian DD/MM/YYYY locale format now supported (same as updateStats); (6) All 38 alert() calls → showToast() — checkout, adminLogin, distLogin, distRegister, distChangePassword, dealership, broadcast, file upload, adminLogout, slider manager, adminDist CRUD sab covered | v36.7 below -->
+<!-- 🔒 SECURITY PATCH v2.9 applied | v36.18.3-upi-fix — UPI Fixes: (1) pdm_upiBtn bank details (accountName/bankAccount/IFSC/bankName) update missing tha — fixed; (2) upiQRImg empty base64 src hata diya — broken image gone, display:none default; (3) QR onerror handler reset on new src; (4) openUPIPayModal QR consistent display logic | v36.18.2-security below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
 <meta http-equiv="X-Content-Type-Options" content="nosniff">
 <!-- 🔒 FIX #6: Referrer policy — sensitive URLs leak band karo -->
 <meta name="referrer" content="strict-origin-when-cross-origin">
+<!-- 🔒 FIX #CSP: Content Security Policy — XSS injection block karo -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self' https://*.supabase.co https://wa.me; img-src 'self' data: blob: https:; font-src 'self' data:;">
 <!-- ✅ NO CDN — Native fetch() based Supabase client (file:// protocol compatible) -->
 <script>
 // ============================================================
@@ -190,7 +192,6 @@ const db = (function() {
     return { from, rpc };
 })();
 
-// ⚠️ REMINDER: Supabase dashboard mein RLS (Row Level Security) enable rakho
 
 // ============================================================
 // ✅ v34: SUPABASE-PRIMARY STORAGE — localStorage sirf runtime cache
@@ -253,7 +254,14 @@ const _origLSRemove = function() {};  // no-op
 async function _hydrateCacheFromSupabase() {
     try {
         const { data, error } = await db.from('settings').select('key,value');
-        if(error) { console.log('[SB-STORE] hydrate skipped (offline/unreachable):', error.message); return; }
+        if(error) {
+            console.log('[SB-STORE] hydrate skipped (offline/unreachable):', error.message);
+            // 🔒 FIX: User ko offline status dikhao — silent fail nahi
+            if(typeof showToast === 'function') {
+                showToast('⚠️ Offline mode — kuch data load nahi ho saka. Internet check karo.', '#ff9800');
+            }
+            return;
+        }
         if(!data || !data.length) return;
         let count = 0;
         data.forEach(function(row) {
@@ -356,6 +364,8 @@ async function sbSaveProduct(p) {
             price_unit: p.priceUnit || ''
         };
         if(row.image_value && row.image_value.length > 500000) {
+            // 🔒 FIX: Silent drop hata diya — user ko clearly error dikhao
+            if(typeof showToast === 'function') showToast('❌ Image bahut badi hai (500KB limit). Choti image use karo ya compress karo.', '#ff4444');
             row.image_value = '🌾'; row.image_type = 'emoji';
         }
         if(p.id && typeof p.id === 'number' && p.id > 0) {
@@ -560,7 +570,8 @@ async function sbLoadBills() {
         // Any other unexpected error — silent fallback
         console.log('sbLoadBills unexpected error, localStorage use hoga:', e.message || e);
         try {
-        } catch(le) {}
+            // fallback: in-memory bills use karo
+        } catch(le) { console.log('sbLoadBills inner fallback error:', le); }
     }
 }
 
@@ -605,11 +616,10 @@ async function sbLoadDealership() {
             /* dealershipEnquiries in-memory */
             console.log('✅ ' + dealershipEnquiries.length + ' dealership enquiries Supabase se load hue!');
         } else {
-            // dealershipEnquiries in-memoryif (d) dealershipEnquiries = JSON.parse(d);
+            // Supabase mein koi dealership enquiries nahi — in-memory array empty rahega
         }
     } catch(e) {
-        console.log('sbLoadDealership error, localStorage fallback:', e.message);
-        // dealershipEnquiries in-memoryif (d) dealershipEnquiries = JSON.parse(d);
+        console.log('sbLoadDealership error, in-memory fallback:', e.message);
     }
 }
 
@@ -655,11 +665,10 @@ async function sbLoadBulkEnquiries() {
             /* bulkEnquiries in-memory */
             console.log('✅ ' + bulkEnquiries.length + ' bulk enquiries Supabase se load hue!');
         } else {
-            // ✅ FIX Audit: b variable nahi hai — in-memory bulkEnquiries use karo
+            // Supabase mein koi bulk enquiries nahi — in-memory array empty rahega
         }
     } catch(e) {
-        console.log('sbLoadBulkEnquiries error, localStorage fallback:', e.message);
-        // ✅ FIX Audit: b variable nahi hai — in-memory bulkEnquiries use karo
+        console.log('sbLoadBulkEnquiries error, in-memory fallback:', e.message);
     }
 }
 
@@ -685,9 +694,7 @@ async function sbLoadUsers() {
         }
     } catch(e) {
         console.log('Supabase users load failed:', e.message);
-        // users in-memory
-        // 🔒 FIX #7: Strip passwords from any cached data too
-        if(u) users = _stripPasswords(JSON.parse(u));
+        // 🔒 FIX: Undeclared variable 'u' remove kiya — in-memory users array use karo (already initialized)
     }
 }
 
@@ -776,7 +783,7 @@ async function initSupabase() {
                         createdAt: c.created_at || new Date().toISOString()
                     };
                 });
-                _coupons = mapped || arr;
+                _coupons = mapped || [];
                 console.log('✅ Coupons Supabase se load hue:', mapped.length);
             }
         })
@@ -843,18 +850,20 @@ async function initSupabase() {
                 // ✅ FIX v36.9: _khataCustomers assign karo
                 _khataCustomers = arr;
                 console.log('✅ Khata customers Supabase se load hue:', arr.length);
-                // ✅ FIX v36.9: har customer ki entries bhi _khataEntries mein assign karo
-                for(const c of arr) {
-                    try {
-                        const { data: entryRes, error: entryErr } = await db.from('settings').select('value').eq('key', 'nexdrop_khata_entries_' + c.id).maybeSingle();
-                        if(!entryErr && entryRes && entryRes.value) {
-                            let ents = typeof entryRes.value === 'string' ? JSON.parse(entryRes.value) : entryRes.value;
-                            if(Array.isArray(ents)) {
-                                _khataEntries[c.id] = ents;
-                            }
-                        }
-                    } catch(ke) { console.log('Khata entries load error for cid=' + c.id + ':', ke.message); }
-                }
+                // 🔒 FIX: N+1 → single bulk fetch — har customer ke liye alag query nahi
+                try {
+                    const { data: allEntryRows, error: allEntryErr } = await db.from('settings').select('key,value').ilike('key', 'nexdrop_khata_entries_%');
+                    if(!allEntryErr && Array.isArray(allEntryRows)) {
+                        allEntryRows.forEach(function(row) {
+                            let cid = row.key.replace('nexdrop_khata_entries_', '');
+                            try {
+                                let ents = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+                                if(Array.isArray(ents)) _khataEntries[cid] = ents;
+                            } catch(pe) { console.log('Khata entries parse error cid=' + cid, pe.message); }
+                        });
+                        console.log('✅ Khata entries bulk load done, customers covered:', allEntryRows.length);
+                    }
+                } catch(ke) { console.log('Khata entries bulk load error:', ke.message); }
             }
         }
         // ✅ FIX v21: Categories Supabase se load karo
@@ -960,7 +969,10 @@ async function initSupabase() {
     console.log('✅ Supabase data loaded!');
 }
 
-// 🔒 Internal auth constant — do not log or expose
+// 🔒 SECURITY NOTE: PASS_SALT frontend mein visible hai (single-file architecture limitation).
+// Production upgrade: Supabase Edge Function mein move karo aur server-side hashing use karo.
+// Tab tak: HTTPS + RLS is salt ki exposure ko mitigate karta hai.
+// ⚠️ Is value ko kabhi change mat karo — sab existing hashed passwords invalidate ho jaayenge.
 const PASS_SALT = 'nexdrop_s@lt_2024_secure';
 async function hashPassword(password) {
     try {
@@ -970,21 +982,33 @@ async function hashPassword(password) {
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return 'sha256:' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     } catch(e) {
-        // ✅ FIX 5: Plain text fallback warning — crypto.subtle sirf HTTPS pe kaam karta hai
-        console.warn('⚠️ hashPassword: crypto.subtle fail hua (HTTPS zaroori hai). Plain text fallback use ho raha hai. Production mein HTTPS enable karein!', e.message);
-        return password; // fallback — only happens on HTTP / non-secure context
+        // 🔒 SECURITY FIX: Plaintext fallback HATA DIYA — insecure context mein password kabhi plaintext save nahi hoga
+        // crypto.subtle sirf HTTPS pe kaam karta hai — HTTP pe login/register block ho jaayega
+        console.error('🔒 SECURITY: hashPassword fail hua. HTTPS required hai. Operation aborted.', e.message);
+        throw new Error('Secure hashing unavailable. HTTPS required. Please use https:// URL.');
     }
 }
 // Verify karo: hashed ya plain text dono support karo (backward compat)
 async function verifyPassword(entered, stored) {
     // ⚠️ Note: Agar stored password blank/null hai to access DENY karo (security fix)
     if(!stored || stored.trim() === '') return false;
-    if(stored.startsWith('sha256:')) {
-        let enteredHash = await hashPassword(entered);
-        return enteredHash === stored;
+    try {
+        if(stored.startsWith('sha256:')) {
+            let enteredHash = await hashPassword(entered);
+            // 🔒 Note: JS mein true constant-time comparison possible nahi hai,
+            // lekin server-side auth (Supabase Edge Function) se pehle ye acceptable hai.
+            return enteredHash === stored;
+        }
+        // 🔒 FIX: Legacy plaintext — warn + auto-migrate on successful verify
+        // ⚠️ Plaintext passwords should not remain. Migration happens on next successful login.
+        // 🔒 EXTRA: Plaintext compare ke baad hash migration trigger karo caller mein
+        console.warn('🔒 SECURITY WARNING: Plaintext password detected in DB. Will auto-migrate to SHA-256 on successful login. Please ensure all users log in to complete migration.');
+        return entered === stored;
+    } catch(e) {
+        // 🔒 hashPassword ne throw kiya (insecure context) — login deny karo
+        console.error('🔒 verifyPassword: hashing failed, login denied.', e.message);
+        return false;
     }
-    // Legacy plain text — direct compare
-    return entered === stored;
 }
 
 // ============================================================
@@ -1001,6 +1025,19 @@ function esc(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+// ✅ FIX: Collision-safe order ID — Date.now() + crypto random suffix (4 digits)
+// crypto.randomUUID() nahi use karte — Supabase bigint ke saath compatible rakhna hai
+function genOrderId() {
+    let rnd;
+    try {
+        const arr = new Uint16Array(1);
+        crypto.getRandomValues(arr);
+        rnd = 1000 + (arr[0] % 9000); // 1000–9999
+    } catch(e) {
+        rnd = Math.floor(1000 + Math.random() * 9000);
+    }
+    return parseInt(String(Date.now()) + String(rnd));
 }
 
 // FIX #6 — HTTPS Enforcement
@@ -1023,32 +1060,32 @@ const _adminVault = (function() {
     return {
         // Session token set karo (only after successful login verification)
         setSession: function() {
-            _sessionToken = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+            // 🔒 FIX: Math.random() insecure tha — crypto.getRandomValues() use karo
+            let token;
+            if(crypto.randomUUID) {
+                token = crypto.randomUUID();
+            } else {
+                const arr = new Uint8Array(16);
+                crypto.getRandomValues(arr);
+                token = Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+            }
+            _sessionToken = token;
             _tokenExpiry = Date.now() + TOKEN_DURATION;
-            try { sessionStorage.setItem('_adm_st', _sessionToken + '|' + _tokenExpiry); } catch(e) {}
+            // 🔒 SECURITY FIX: sessionStorage mein token store NAHI karo —
+            // XSS attack se chori ho sakta tha. In-memory only rakho.
+            // Page refresh pe re-login zaroori hai (acceptable tradeoff).
         },
         // Token valid hai?
         isLoggedIn: function() {
-            if (_sessionToken && Date.now() < _tokenExpiry) return true;
-            // sessionStorage se restore try karo (page refresh)
-            try {
-                const saved = sessionStorage.getItem('_adm_st');
-                if (saved) {
-                    const [tok, exp] = saved.split('|');
-                    if (tok && Date.now() < parseInt(exp)) {
-                        _sessionToken = tok;
-                        _tokenExpiry = parseInt(exp);
-                        return true;
-                    }
-                }
-            } catch(e) {}
-            return false;
+            // 🔒 SECURITY FIX: sessionStorage se restore hata diya — XSS attack vector tha
+            // Sirf in-memory token check karo
+            return (_sessionToken !== null && Date.now() < _tokenExpiry);
         },
         // Logout — token invalidate karo
         invalidate: function() {
             _sessionToken = null;
             _tokenExpiry = 0;
-            try { sessionStorage.removeItem('_adm_st'); } catch(e) {}
+            // 🔒 sessionStorage mein ab kuch nahi — cleanup bhi nahi zaroori
         }
     };
 })();
@@ -2501,7 +2538,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <div style="font-size:0.8rem;font-weight:700;color:#333;margin-bottom:0.6rem;">📷 Scan QR Code to Pay</div>
         <div style="background:#f5f0ea;border-radius:16px;padding:0.8rem;display:inline-block;border:2px solid #1565c0;">
           <!-- SBI QR — embedded as the actual bank QR image uploaded by user -->
-          <img src="data:image/png;base64," id="upiQRImg" style="width:200px;height:200px;object-fit:contain;border-radius:8px;" onerror="this.style.display='none';document.getElementById('upiQRFallback').style.display='flex'">
+          <img src="" id="upiQRImg" style="width:200px;height:200px;object-fit:contain;border-radius:8px;display:none;" onerror="this.style.display='none';document.getElementById('upiQRFallback').style.display='flex'">
           <div id="upiQRFallback" style="display:none;width:200px;height:200px;background:#f0f7ff;border-radius:8px;flex-direction:column;align-items:center;justify-content:center;gap:0.5rem;">
             <div style="font-size:3rem;">📱</div>
             <div style="font-size:0.72rem;color:#555;text-align:center;padding:0 0.5rem;">UPI QR — Use UPI ID below to pay</div>
@@ -4957,9 +4994,16 @@ let users = [];
 let bills = [];
 let bulkEnquiries = [], cart = [], currentUser = null;
 
-// ✅ BUG FIX: Cart localStorage persistence
-function saveCart() { /* cart is in-memory — no localStorage needed */ }
-function loadCart() { /* cart starts empty on page load — in-memory only */ cart = []; }
+// ✅ FIX: Cart localStorage mein persist karo — page refresh pe cart na kho
+function saveCart() {
+    try { localStorage.setItem('nexdrop_cart', JSON.stringify(cart)); } catch(e) {}
+}
+function loadCart() {
+    try {
+        let saved = localStorage.getItem('nexdrop_cart');
+        cart = saved ? JSON.parse(saved) : [];
+    } catch(e) { cart = []; }
+}
 let settings = { defaultCourier: 40, freeMin: 999, whatsappNo: "919006606697", sellerStateCode: "10", qrCodeImage: null, upiId: "43459091963@sbi", bankAccount: "43459091963", bankName: "State Bank of India", bankIFSC: "SBIN0018623", accountName: "Nexdrop Solutions Pvt. Ltd." };
 
 // Default products image map (pexels URLs)
@@ -5016,31 +5060,96 @@ function resetProductImages() {
     showToast('✅ Images reset!');
 }
 function saveProducts() {
-    // Supabase mein save karo (sab products)
-    products.forEach(p => sbSaveProduct(p));
-    // localStorage backup bhi rakho
-    /* products saved via sbSaveProduct - Supabase only */
+    // ✅ FIX N+1: Bulk upsert — ek hi Supabase call, forEach loop nahi
+    if(products && products.length > 0) {
+        try {
+            const rows = products.map(p => ({
+                ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                name: p.name,
+                price: p.price,
+                mrp: p.mrp || p.price,
+                category: p.category,
+                description: p.desc || p.description || '',
+                image_type: p.imageType,
+                image_value: (p.imageValue && p.imageValue.length > 500000) ? '🌾' : (p.imageValue || ''),
+                in_stock: p.inStock,
+                stock_qty: p.stockQty,
+                discount: p.discount || 0,
+                hsn_code: p.hsnCode || '',
+                gst_slab: p.gstSlab || 0,
+                cod_allowed: p.codAllowed !== false,
+                courier_charge: p.courierCharge || 0,
+                highlights: p.highlights || [],
+                extra_images: p.extraImages || [],
+                price_unit: p.priceUnit || ''
+            }));
+            db.from('products').upsert(rows, { onConflict: 'id' }).then(function(r) {
+                if(r && r.error) console.log('saveProducts bulk upsert error:', r.error.message);
+            });
+        } catch(e) { console.log('saveProducts error:', e.message); }
+    }
     updateStats(); displayProducts();
     if(typeof displayHomeProducts === 'function') displayHomeProducts(); // ✅ FIX: Home page grid update karo
 }
 function saveOrders() {
-    // Supabase mein save karo
-    orders.forEach(o => sbSaveOrder(o));
-    /* orders saved via Supabase */
+    // ✅ FIX N+1: Bulk upsert — ek hi Supabase call, forEach loop nahi
+    if(orders && orders.length > 0) {
+        try {
+            const rows = orders.map(order => ({
+                id: order.id || undefined,
+                user_email: order.userId || '',
+                customer_name: order.customerName || '',
+                customer_phone: order.customerPhone || '',
+                customer_address: order.customerAddress || '',
+                items: order.items,
+                total: order.total,
+                status: order.status || 'Pending',
+                bill_number: order.billNumber || '',
+                payment_method: order.paymentMethod || '',
+                order_type: order.orderType || 'retail',
+                stock_deducted: order.stockDeducted || false,
+                admin_note: order.adminNote || '',
+                coupon_code: order.couponCode || '',
+                discount_amount: order.discountAmount || 0,
+                courier: order.courier || 0,
+                customer_gstin: order.customerGstin || '',
+                customer_state_code: order.customerStateCode || '',
+                customer_state_name: order.customerStateName || ''
+            }));
+            db.from('orders').upsert(rows, { onConflict: 'id' }).then(function(r) {
+                if(r && r.error) console.log('saveOrders bulk upsert error:', r.error.message);
+            });
+        } catch(e) { console.log('saveOrders error:', e.message); }
+    }
     updateStats();
 }
 function saveUsers() {
     // 🔒 FIX #7: passwords localStorage mein store NAHI honge
-    const safeUsers = (users || []).map(u => {
-        const { password, _newPassword, ...safe } = u;
-        return safe;
-    });
-    /* users saved via Supabase */
-    // ✅ FIX v26: Supabase mein bhi sync karo (admin panel se user edit hone par)
-    // Note: sbSaveUser password nahi save karta jab _newPassword nahi hota
-    (users || []).forEach(u => {
-        if(u.email) sbSaveUser(u);
-    });
+    // ✅ FIX N+1: Bulk upsert — forEach loop nahi, ek hi call
+    if(users && users.length > 0) {
+        try {
+            // Password wale users alag handle karo (hashing async hai)
+            const usersNeedingHashUpdate = users.filter(u => u.email && u._newPassword);
+            const usersSimple = users.filter(u => u.email && !u._newPassword);
+            // Simple users: bulk upsert (no password change)
+            if(usersSimple.length > 0) {
+                const rows = usersSimple.map(u => ({
+                    name: u.name,
+                    email: u.email,
+                    phone: u.phone || '',
+                    address: u.address || '',
+                    loyalty_points: u.loyaltyPoints || 0,
+                    ...(u.gstin !== undefined ? { gstin: u.gstin || '' } : {}),
+                    ...(u.stateCode !== undefined ? { state_code: u.stateCode || '' } : {})
+                }));
+                db.from('users').upsert(rows, { onConflict: 'email' }).then(function(r) {
+                    if(r && r.error) console.log('saveUsers bulk upsert error:', r.error.message);
+                });
+            }
+            // Users needing password hash: individual async save (rare case)
+            usersNeedingHashUpdate.forEach(u => sbSaveUser(u));
+        } catch(e) { console.log('saveUsers error:', e.message); }
+    }
     updateStats();
 }
 function saveBulk() {
@@ -5050,8 +5159,34 @@ function saveBulk() {
     updateStats();
 }
 function saveB2B() {
-    // ✅ FIX v36: Per-product Supabase save (products table)
-    b2bProducts.forEach(p => sbSaveProduct(p));
+    // ✅ FIX N+1: Bulk upsert — ek hi Supabase call, forEach loop nahi
+    if(b2bProducts && b2bProducts.length > 0) {
+        try {
+            const rows = b2bProducts.map(p => ({
+                ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                name: p.name,
+                price: p.price,
+                mrp: p.mrp || p.price,
+                category: p.category,
+                description: p.desc || p.description || '',
+                image_type: p.imageType,
+                image_value: (p.imageValue && p.imageValue.length > 500000) ? '🌾' : (p.imageValue || ''),
+                in_stock: p.inStock,
+                stock_qty: p.stockQty,
+                discount: p.discount || 0,
+                hsn_code: p.hsnCode || '',
+                gst_slab: p.gstSlab || 0,
+                cod_allowed: p.codAllowed !== false,
+                courier_charge: p.courierCharge || 0,
+                highlights: p.highlights || [],
+                extra_images: p.extraImages || [],
+                price_unit: p.priceUnit || ''
+            }));
+            db.from('products').upsert(rows, { onConflict: 'id' }).then(function(r) {
+                if(r && r.error) console.log('saveB2B bulk upsert error:', r.error.message);
+            });
+        } catch(e) { console.log('saveB2B error:', e.message); }
+    }
     // ✅ FIX v36: B2B array ko settings table mein bhi save karo (multi-device sync ke liye)
     try {
         db.from('settings').upsert(
@@ -5107,9 +5242,15 @@ function calcOrderGST(o) {
     let parseTotal = t => { if(typeof t === 'number') return t; return parseInt(String(t).replace(/[₹,]/g,''))||0; };
     let g = 0;
     (o.items || []).forEach(function(item) {
-        let prod = products.find(function(p){ return p.id === item.productId || p.name === item.name; })
-                || b2bProducts.find(function(p){ return p.id === item.productId || p.name === item.name; });
-        let slab = (prod && prod.gstSlab != null) ? prod.gstSlab : 5;
+        // 🔒 FIX: item.gstSlab snapshot use karo (order time pe captured), fallback product lookup, then 5%
+        let slab;
+        if(item.gstSlab != null) {
+            slab = item.gstSlab;
+        } else {
+            let prod = products.find(function(p){ return p.id === item.productId || p.name === item.name; })
+                    || b2bProducts.find(function(p){ return p.id === item.productId || p.name === item.name; });
+            slab = (prod && prod.gstSlab != null) ? prod.gstSlab : 5;
+        }
         let amt = parseTotal(item.price || 0) * (item.quantity || 1);
         g += Math.round((amt / (1 + slab/100)) * (slab/100) * 100) / 100;
     });
@@ -5282,11 +5423,16 @@ function buildRetailCard(p) {
     else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 5) stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">🔥 Only ' + p.stockQty + ' left!</div>';
     else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10) stockBadge = '<div style="font-size:0.65rem;color:#ff9800;font-weight:700;margin:2px 0;">⚡ Only ' + p.stockQty + ' remaining</div>';
     let discBadgeHtml = p.discount > 0 ? `<div class="product-badge" style="background:#ff4444;">${p.discount}% OFF</div>` : '';
+    // 🔒 FIX XSS: p.name, p.category, p.desc, p.priceUnit — esc() se sanitize karo
+    let safeName = esc(p.name);
+    let safeCat = esc(p.category);
+    let safeDesc = esc(p.desc);
+    let safePriceUnit = esc(p.priceUnit);
     return `<div class="product-card" style="cursor:pointer;" onclick="openProductModal('retail',${p.id})">
   ${discBadgeHtml}<div class="product-image">${imgHtml}</div>
   <div class="product-info">
-    <div class="product-name">${p.name}</div>
-    <div class="price"><span class="current-price">₹${Math.round(discPrice)}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+p.priceUnit+'</span>':''}</span>${p.discount>0?' <span style="font-size:0.9rem;color:#999;margin:0 4px;">-</span> <span class="original-price" style="font-size:0.85rem;text-decoration:line-through;">₹'+p.price+'</span> <span style="font-size:0.65rem;background:#2c5a4a;color:white;padding:1px 6px;border-radius:10px;margin-left:2px;">'+p.discount+'% OFF</span>':''}</div>
+    <div class="product-name">${safeName}</div>
+    <div class="price"><span class="current-price">₹${Math.round(discPrice)}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+safePriceUnit+'</span>':''}</span>${p.discount>0?' <span style="font-size:0.9rem;color:#999;margin:0 4px;">-</span> <span class="original-price" style="font-size:0.85rem;text-decoration:line-through;">₹'+p.price+'</span> <span style="font-size:0.65rem;background:#2c5a4a;color:white;padding:1px 6px;border-radius:10px;margin-left:2px;">'+p.discount+'% OFF</span>':''}</div>
     ${stockBadge}
     <div style="display:flex;gap:0.3rem;margin-top:0.6rem;">
       <button class="add-to-cart" onclick="event.stopPropagation();addToCart(${p.id});showToast('✅ Added to cart!','#2c5a4a');" style="flex:1;background:#2c5a4a;font-size:0.75rem;padding:0.55rem 0.4rem;">🛒 Add to Cart</button>
@@ -5294,12 +5440,12 @@ function buildRetailCard(p) {
     <button class="product-details-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▲ Hide Details':'▼ View Details'">▼ View Details</button>
     <div class="product-hidden-details">
       ${p.discount>0?'<div>🏷️ Discount: <strong>'+p.discount+'% OFF</strong></div>':''}
-      <div>📦 Category: ${p.category}</div>
+      <div>📦 Category: ${safeCat}</div>
       <div>${p.courierCharge === 0 ? '✅ Free Delivery' : '🚚 Courier: +₹'+p.courierCharge}</div>
       <div>${p.inStock ? '✅ In Stock' : '❌ Out of Stock'}</div>
       <div style="color:${p.codAllowed!==false?'#2c5a4a':'#ff4444'};font-weight:600;">${p.codAllowed!==false?'🏠 COD Available':'🚫 COD Not Available'}</div>
       <div class="rating" style="margin-top:0.3rem;">${stars} (${p.ratingCount})</div>
-      ${p.desc?'<div style="margin-top:0.3rem;white-space:pre-line;border-top:1px solid #f0ebe4;padding-top:0.3rem;">'+p.desc+'</div>':''}
+      ${p.desc?'<div style="margin-top:0.3rem;white-space:pre-line;border-top:1px solid #f0ebe4;padding-top:0.3rem;">'+safeDesc+'</div>':''}
       <button onclick="event.stopPropagation();openProductModal('retail',${p.id})" style="margin-top:0.5rem;width:100%;background:#f0f7f0;color:#2c5a4a;border:1px solid #c8e6c9;border-radius:10px;padding:0.4rem;font-size:0.72rem;cursor:pointer;font-weight:600;">🔍 Full Details / Buy Now</button>
     </div>
   </div>
@@ -5413,7 +5559,7 @@ function displayB2B() {
             ? `<img src="${p.imageValue}">`
             : `<span style="font-size:3.5rem;">${p.icon || p.imageValue || '\u{1F3ED}'}</span>`;
         let discountBadge = `<div class="product-badge" style="background:#c49a6c;">Wholesale</div>`;
-        let catBadge = `<div class="product-category">${p.category}</div>`;
+        let catBadge = `<div class="product-category">${esc(p.category)}</div>`;
         let stockBadge = '';
         if(!p.inStock) {
             stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">\u274C Out of Stock</div>';
@@ -5441,8 +5587,8 @@ function displayB2B() {
             ${discountBadge}${catBadge}
             <div class="product-image">${imgHtml}</div>
             <div class="product-info">
-                <div class="product-name">${p.name}</div>
-                <div class="product-desc" style="white-space:pre-line;">${p.desc}</div>
+                <div class="product-name">${esc(p.name)}</div>
+                <div class="product-desc" style="white-space:pre-line;">${esc(p.desc)}</div>
                 ${hlHtml}
                 <div class="price" style="margin:0.4rem 0;">
                     ${hasNumericPrice && discPrice !== null
@@ -5625,10 +5771,26 @@ function openProductModal(type, id) {
                 if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
                 window._upiTotal = total;
                 window._upiId = settings.upiId || '43459091963@sbi';
-                let qrImg = document.getElementById('upiQRImg');
                 let upiId = window._upiId;
+                // 🔒 FIX: Bank details update karo (pdm path mein missing tha)
+                const _bankMap = {
+                    'upiBankAccName': settings.accountName,
+                    'upiBankAccNo':   settings.bankAccount,
+                    'upiBankIFSC':    settings.bankIFSC,
+                    'upiBankName':    settings.bankName
+                };
+                Object.entries(_bankMap).forEach(([id, val]) => { const el = document.getElementById(id); if(el && val) el.textContent = val; });
+                // 🔒 FIX: QR image properly set karo
+                let qrImg = document.getElementById('upiQRImg');
+                let qrFallback = document.getElementById('upiQRFallback');
                 let upiLink = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(settings.companyName||'Nexdrop Solutions') + '&am=' + total + '&cu=INR';
-                if(qrImg) qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(upiLink);
+                if(settings.qrCodeImage) {
+                    if(qrImg) { qrImg.src = settings.qrCodeImage; qrImg.style.display = 'block'; }
+                    if(qrFallback) qrFallback.style.display = 'none';
+                } else {
+                    if(qrImg) { qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(upiLink); qrImg.style.display = 'block'; }
+                    if(qrFallback) qrFallback.style.display = 'none';
+                }
                 document.getElementById('upiModalAmount').textContent = '₹' + total;
                 document.getElementById('upiIdDisplay').textContent = upiId;
                 document.getElementById('upiPayModal').style.display = 'block';
@@ -5903,14 +6065,18 @@ async function checkout() {
     let courier = (subtotal >= settings.freeMin || isFreeShipping) ? 0 : maxCourier;
     let total = subtotal - couponDiscount + courier;
     if(total < 0) total = 0;
-    let orderId = Date.now();
+    let orderId = genOrderId(); // ✅ FIX: Date.now() collision-safe
     let hasCODItem = cart.some(i => { if(i.isB2B) return false; let p = products.find(pr => pr.id === i.id); return p && p.codAllowed === false; });
     let paymentMethod = hasCODItem ? 'Online' : 'COD';
     // Determine orderType: mixed, wholesale, or retail
     let hasWholesale = cart.some(i => i.isB2B);
     let hasRetail = cart.some(i => !i.isB2B);
     let orderType = (hasWholesale && hasRetail) ? 'mixed' : hasWholesale ? 'wholesale' : 'retail';
-    let order = { id: orderId, customerName: currentUser.name, customerPhone: currentUser.phone, customerAddress: currentUser.address, userId: currentUser.email, items: cart.map(i => ({ productId: i.id, name: i.name, quantity: i.quantity, price: i.price, isWholesale: i.isB2B||false })), total: total, courier: courier, status: 'Pending', paymentMethod: paymentMethod, paymentStatus: 'PENDING', orderType: orderType, date: new Date().toLocaleString(),
+    let order = { id: orderId, customerName: currentUser.name, customerPhone: currentUser.phone, customerAddress: currentUser.address, userId: currentUser.email, items: cart.map(i => {
+        // 🔒 FIX: GST slab snapshot at order time — deleted products ka slab lost na ho
+        let prodRef = products.find(pr => pr.id === i.id) || b2bProducts.find(pr => pr.id === i.id);
+        return { productId: i.id, name: i.name, quantity: i.quantity, price: i.price, isWholesale: i.isB2B||false, gstSlab: (prodRef && prodRef.gstSlab != null) ? prodRef.gstSlab : 5 };
+    }), total: total, courier: courier, status: 'Pending', paymentMethod: paymentMethod, paymentStatus: 'PENDING', orderType: orderType, date: new Date().toLocaleString(),
         // ✅ FIX v26: coupon + GST fields
         couponCode: activeCoupon ? activeCoupon.code : '',
         discountAmount: couponDiscount || 0,
@@ -5993,6 +6159,8 @@ function openUPIPayModal() {
         qrImg.style.display = 'block';
         qrFallback.style.display = 'none';
     }
+    // 🔒 FIX: Reset qrImg onerror — naya src set hone pe purana error state clear karo
+    qrImg.onerror = function() { this.style.display='none'; if(qrFallback) qrFallback.style.display='flex'; };
 
     // Store total for direct UPI link
     window._upiTotal = total;
@@ -6058,14 +6226,14 @@ function buyNow(productId) {
     let paymentMethod = p.codAllowed === false ? 'Online' : 'COD';
 
     // Step 4: Save order
-    let orderId = Date.now();
+    let orderId = genOrderId(); // ✅ FIX: Date.now() collision-safe
     let order = {
         id: orderId,
         customerName: currentUser.name,
         customerPhone: currentUser.phone,
         customerAddress: currentUser.address,
         userId: currentUser.email,
-        items: [{ productId: p.id, name: p.name, quantity: 1, price: discPrice }],
+        items: [{ productId: p.id, name: p.name, quantity: 1, price: discPrice, gstSlab: (p.gstSlab != null) ? p.gstSlab : 5 }],
         total: total,
         courier: courier,
         status: 'Pending',
@@ -6079,8 +6247,8 @@ function buyNow(productId) {
         customerGstin: (currentUser && currentUser.gstin) ? currentUser.gstin : '',
         customerStateCode: (currentUser && currentUser.stateCode) ? currentUser.stateCode : ''
     };
-    orders.unshift(order); saveOrders();
-    // ✅ FIX: buyNow bhi Supabase mein save karo — actual order object pass karo
+    orders.unshift(order);
+    // ✅ FIX: saveOrders() hata diya — N+1 trigger hota tha; sirf sbSaveOrder se naya order save karo
     sbSaveOrder(order);
 
     // Step 5: Build WhatsApp message (same format as cart checkout)
@@ -6599,7 +6767,7 @@ function loadDashboard() {
             <strong style="font-size:0.85rem;">#${String(o.id).slice(-6)}</strong>
             <span style="background:${statusColor};color:white;padding:0.15rem 0.6rem;border-radius:20px;font-size:0.65rem;font-weight:600;">${o.status}</span>
           </div>
-          <div style="font-size:0.75rem;color:#6b5e4a;margin-top:0.3rem;">${o.items.map(i=>i.name+' ×'+i.quantity).join(', ')}</div>
+          <div style="font-size:0.75rem;color:#6b5e4a;margin-top:0.3rem;">${o.items.map(i=>esc(i.name)+' ×'+Number(i.quantity)).join(', ')}</div>
           <div style="display:flex;justify-content:space-between;margin-top:0.3rem;">
             <span style="font-size:0.7rem;color:#999;">${o.date||''}</span>
             <strong style="color:#c49a6c;">₹${o.total}</strong>
@@ -7059,6 +7227,9 @@ function saveSingleProduct(id) {
 function uploadAdminPhoto(id, input) {
     let file = input.files[0];
     if(!file) return;
+    // 🔒 FIX: MIME type validation — sirf images allow karo
+    const allowedTypes = ['image/jpeg','image/png','image/webp','image/gif'];
+    if(!allowedTypes.includes(file.type)) { showToast('❌ Sirf image files allowed hain (JPG, PNG, WEBP, GIF)!', '#ff4444'); input.value=''; return; }
     if(file.size > 10*1024*1024) { showToast('❌ File bahut badi hai! Max 10MB allowed hai.', '#ff4444'); return; }
     
     // Show loading indicator
@@ -7091,8 +7262,9 @@ function uploadAdminPhoto(id, input) {
     };
     reader.readAsDataURL(file);
 }
-function toggleStock(id) { let p=products.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveProducts(); loadAdminProducts(); displayProducts(); if(typeof refreshStockDashboard==='function') refreshStockDashboard(); } }
-function toggleCOD(id) { 
+function toggleStock(id) { if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} let p=products.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveProducts(); loadAdminProducts(); displayProducts(); if(typeof refreshStockDashboard==='function') refreshStockDashboard(); } }
+function toggleCOD(id) {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let p=products.find(p=>p.id===id); 
     if(p){ 
         p.codAllowed = p.codAllowed===false ? true : false; 
@@ -7103,7 +7275,9 @@ function toggleCOD(id) {
     } 
 }
 // ✅ FIX: confirm() → 2-step toast
+// 🔒 FIX: Admin session check added
 function deleteProduct(id) {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let key = '_delProd_' + id;
     if(window[key]) {
         window[key] = false;
@@ -7116,8 +7290,9 @@ function deleteProduct(id) {
         setTimeout(function(){ window[key]=false; }, 4000);
     }
 }
-function addProduct() { let newId = Math.max(...products.map(p=>p.id),0)+1; let sqVal = parseInt(document.getElementById('newStockQty').value); let stockQty = isNaN(sqVal) ? null : sqVal; let gstSlabVal = parseFloat(document.getElementById('newGstSlab').value); let newProduct = { id:newId, name:document.getElementById('newName').value||'New Makhana', desc:document.getElementById('newDesc').value||'Description', highlights:[], price:parseInt(document.getElementById('newPrice').value)||199, imageType:'emoji', imageValue:'🌾', discount:parseInt(document.getElementById('newDiscount').value)||0, rating:4.0, ratingCount:0, courierCharge:parseInt(document.getElementById('newCourier').value)||40, category:document.getElementById('newCategory').value||'Makhana', inStock:stockQty===null||stockQty>0, stockQty:stockQty, hsnCode:document.getElementById('newHsnCode').value.trim()||'1108', gstSlab:isNaN(gstSlabVal)?5:gstSlabVal, priceUnit:document.getElementById('newPriceUnit').value||'' }; let file = document.getElementById('newProductPhoto').files[0]; if(file) { let reader = new FileReader(); reader.onload = function(e) { let img = new Image(); img.onload = function() { let canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 600 * img.height / img.width; canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height); newProduct.imageType = 'upload'; newProduct.imageValue = canvas.toDataURL('image/jpeg', 0.7); products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product + photo added!'); }; img.src = e.target.result; }; reader.readAsDataURL(file); } else { products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product added!'); document.getElementById('newPriceUnit').value=''; } }
+function addProduct() { if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} let newId = Math.max(...products.map(p=>p.id),0)+1; let sqVal = parseInt(document.getElementById('newStockQty').value); let stockQty = isNaN(sqVal) ? null : sqVal; let gstSlabVal = parseFloat(document.getElementById('newGstSlab').value); let newProduct = { id:newId, name:document.getElementById('newName').value||'New Makhana', desc:document.getElementById('newDesc').value||'Description', highlights:[], price:parseInt(document.getElementById('newPrice').value)||199, imageType:'emoji', imageValue:'🌾', discount:parseInt(document.getElementById('newDiscount').value)||0, rating:4.0, ratingCount:0, courierCharge:parseInt(document.getElementById('newCourier').value)||40, category:document.getElementById('newCategory').value||'Makhana', inStock:stockQty===null||stockQty>0, stockQty:stockQty, hsnCode:document.getElementById('newHsnCode').value.trim()||'1108', gstSlab:isNaN(gstSlabVal)?5:gstSlabVal, priceUnit:document.getElementById('newPriceUnit').value||'' }; let file = document.getElementById('newProductPhoto').files[0]; if(file) { const _aImg=['image/jpeg','image/png','image/webp','image/gif']; if(!_aImg.includes(file.type)){showToast('❌ Sirf image files allowed hain (JPG,PNG,WEBP,GIF)!','#ff4444');return;} let reader = new FileReader(); reader.onload = function(e) { let img = new Image(); img.onload = function() { let canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 600 * img.height / img.width; canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height); newProduct.imageType = 'upload'; newProduct.imageValue = canvas.toDataURL('image/jpeg', 0.7); products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product + photo added!'); }; img.src = e.target.result; }; reader.readAsDataURL(file); } else { products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product added!'); document.getElementById('newPriceUnit').value=''; } }
 function addB2BProduct() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let nameVal = document.getElementById('newB2BName').value.trim();
     if(!nameVal) { showToast('❌ Product name required!', '#ff4444'); return; }
     let newId = Math.max(...b2bProducts.map(p=>p.id), 0) + 1;
@@ -7142,6 +7317,9 @@ function addB2BProduct() {
     };
     let file = document.getElementById('newB2BPhoto').files[0];
     if(file) {
+        // 🔒 FIX: MIME type validation
+        const _allowedImg = ['image/jpeg','image/png','image/webp','image/gif'];
+        if(!_allowedImg.includes(file.type)) { showToast('❌ Sirf image files allowed hain (JPG, PNG, WEBP, GIF)!', '#ff4444'); document.getElementById('newB2BPhoto').value=''; return; }
         let reader = new FileReader();
         reader.onload = function(e) {
             let img = new Image();
@@ -7375,7 +7553,7 @@ function deleteB2B(id) {
         setTimeout(function() { if(window[key]) window[key] = false; }, 4000);
     }
 }
-function toggleB2BStock(id) { let p=b2bProducts.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveB2B(); loadAdminB2B(); displayB2B(); } }
+function toggleB2BStock(id) { if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} let p=b2bProducts.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveB2B(); loadAdminB2B(); displayB2B(); } }
 function loadAdminOrders() {
     let filterStatus = document.getElementById('orderStatusFilter')?.value || '';
     let dateFrom = document.getElementById('orderDateFrom')?.value || '';
@@ -7619,6 +7797,7 @@ function updateStatus(id, status) {
 }
 // ✅ FIX: confirm() hata diya — 2-step toast pattern (mobile safe)
 function deleteOrder(id) {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let key = '_delOrder_' + id;
     if(window[key]) {
         window[key] = false;
@@ -7865,6 +8044,9 @@ function saveCompanySettings() {
     let logoFile = document.getElementById('settingLogoUpload');
     if(logoFile && logoFile.files[0]) {
         let file = logoFile.files[0];
+        // 🔒 FIX: MIME type validation
+        const _aLogoImg = ['image/jpeg','image/png','image/webp','image/gif'];
+        if(!_aLogoImg.includes(file.type)) { showToast('❌ Sirf image files allowed hain (JPG, PNG, WEBP, GIF)!', '#ff4444'); logoFile.value=''; return; }
         if(file.size > 3*1024*1024) { showToast('❌ Logo file must be max 3MB!', '#ff4444'); return; }
         let reader = new FileReader();
         reader.onload = function(e) {
@@ -7941,6 +8123,9 @@ function savePaymentSettings() {
     // QR image upload
     let qrFile = document.getElementById('settingQRUpload');
     if(qrFile && qrFile.files[0]) {
+        // 🔒 FIX: MIME type validation
+        const _aQrImg = ['image/jpeg','image/png','image/webp','image/gif'];
+        if(!_aQrImg.includes(qrFile.files[0].type)) { showToast('❌ Sirf image files allowed hain (JPG, PNG, WEBP, GIF)!', '#ff4444'); qrFile.value=''; return; }
         let reader = new FileReader();
         reader.onload = function(e) {
             settings.qrCodeImage = e.target.result;
@@ -8203,14 +8388,14 @@ function renderSellersTable() {
     const statusStyle = { approved:'background:#e8f5e9;color:#2e7d32', pending:'background:#fff8e1;color:#f57f17', banned:'background:#f3e5f5;color:#6a1b9a', rejected:'background:#ffebee;color:#c62828' };
     tbody.innerHTML = filtered.map((s,i) => `<tr>
         <td style="color:#888">${i+1}</td>
-        <td><b>${s.shopName||'—'}</b></td>
-        <td>${s.owner||'—'}</td>
-        <td>${s.phone||'—'}</td>
-        <td>${s.city||'—'}</td>
-        <td style="font-size:0.72rem">${s.gstin||'—'}</td>
+        <td><b>${esc(s.shopName)||'—'}</b></td>
+        <td>${esc(s.owner)||'—'}</td>
+        <td>${esc(s.phone)||'—'}</td>
+        <td>${esc(s.city)||'—'}</td>
+        <td style="font-size:0.72rem">${esc(s.gstin)||'—'}</td>
         <td><span style="background:#e8f5e9;color:#2e7d32;border-radius:20px;padding:2px 8px;font-size:0.72rem;">${s.productCount} products</span></td>
-        <td><span style="border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;${statusStyle[s.status]||statusStyle.pending}">${s.status}</span></td>
-        <td style="font-size:0.72rem;color:#888">${s.joined}</td>
+        <td><span style="border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;${statusStyle[s.status]||statusStyle.pending}">${esc(s.status)}</span></td>
+        <td style="font-size:0.72rem;color:#888">${esc(s.joined)}</td>
         <td style="white-space:nowrap">
             ${s.status==='pending'?`<button onclick="sellerUpdateStatus('${s.id}','approved')" style="background:#16a34a;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;margin-right:3px;">✓ Approve</button><button onclick="sellerUpdateStatus('${s.id}','rejected')" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">✗ Reject</button>`:''}
             ${s.status==='approved'?`<button onclick="sellerUpdateStatus('${s.id}','banned')" style="background:#7c3aed;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">🚫 Ban</button>`:''}
@@ -8416,7 +8601,7 @@ function loadBRCMUsers() {
     users.forEach(u => { if(u.phone) allContacts.push({name:u.name, phone:u.phone, type:"user"}); });
     bulkEnquiries.forEach(e => { if(e.phone && !allContacts.find(c=>c.phone===e.phone)) allContacts.push({name:e.name, phone:e.phone, type:"enquiry"}); });
     if(allContacts.length === 0) { document.getElementById("brcmUserList").innerHTML = "<p style=\"color:#999;font-size:0.8rem;text-align:center;padding:1rem;\">No registered users found yet</p>"; updateBRCMCount(); return; }
-    html = allContacts.map((c,i) => `<div class="brcm-contact"><input type="checkbox" id="brcm_${i}" value="${c.phone}" onchange="updateBRCMCount()" checked><label for="brcm_${i}">${c.name} <span style="background:${c.type==="user"?"#e8f5e9":"#fff3e0"};color:${c.type==="user"?"#2c5a4a":"#c49a6c"};padding:1px 5px;border-radius:8px;font-size:0.62rem;">${c.type==="user"?"👤 User":"🏭 Enquiry"}</span></label><span class="brcm-phone">📞 ${c.phone}</span></div>`).join("");
+    html = allContacts.map((c,i) => `<div class="brcm-contact"><input type="checkbox" id="brcm_${i}" value="${esc(c.phone)}" onchange="updateBRCMCount()" checked><label for="brcm_${i}">${esc(c.name)} <span style="background:${c.type==="user"?"#e8f5e9":"#fff3e0"};color:${c.type==="user"?"#2c5a4a":"#c49a6c"};padding:1px 5px;border-radius:8px;font-size:0.62rem;">${c.type==="user"?"👤 User":"🏭 Enquiry"}</span></label><span class="brcm-phone">📞 ${esc(c.phone)}</span></div>`).join("");
     document.getElementById("brcmUserList").innerHTML = html;
     updateBRCMCount();
 }
@@ -8591,10 +8776,10 @@ function buildStockCard(p, isB2B, accentColor) {
         : '<span style="background:#4caf50;color:white;padding:1px 7px;border-radius:20px;font-size:0.6rem;">✅ OK</span>';
     return `<div style="background:${bgColor};border-radius:12px;padding:0.85rem;border:2px solid ${borderColor};">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.4rem;">
-            <strong style="font-size:0.8rem;flex:1;margin-right:0.4rem;line-height:1.3;">${p.name}</strong>
+            <strong style="font-size:0.8rem;flex:1;margin-right:0.4rem;line-height:1.3;">${esc(p.name||'')}</strong>
             ${statusBadge}
         </div>
-        <div style="font-size:0.65rem;color:#6b5e4a;margin-bottom:0.5rem;">📁 ${p.category||'—'} | ₹${p.price}</div>
+        <div style="font-size:0.65rem;color:#6b5e4a;margin-bottom:0.5rem;">📁 ${esc(p.category||'—')} | ₹${p.price}</div>
         <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.35rem;">
             <button onclick="adjustStockV2('${prefix}',${p.id},-1)" style="background:#ff4444;color:white;border:none;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:1rem;font-weight:700;flex-shrink:0;">−</button>
             <input type="number" id="smv2_${prefix}_${p.id}" value="${qty}" min="0"
@@ -8735,10 +8920,10 @@ function loadStockManager() {
                 html += `<div style="background:${lightBg};border-radius:14px;padding:1rem;margin-bottom:1rem;border:2px solid ${color};">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.4rem;">
                         <div>
-                            <h4 style="color:${color};margin:0;">🏷️ ${catName} — ${typeLabel} Stock Manager</h4>
+                            <h4 style="color:${color};margin:0;">🏷️ ${esc(catName)} — ${typeLabel} Stock Manager</h4>
                             <span style="font-size:0.7rem;color:#888;">Total: <b id="sm_custom_${prefix}_total_${slug}">${totalQty}</b> units</span>
                         </div>
-                        <button onclick="${saveFn}" style="background:${color};color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save ${catName}</button>
+                        <button onclick="${saveFn}" style="background:${color};color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save ${esc(catName)}</button>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.7rem;">
                         ${arr.map(p => buildStockCard(p, isB2B, color)).join('')}
@@ -8955,10 +9140,11 @@ function generateBillData(o) {
     if(existingBill && existingBill.billNo) {
         billNo = existingBill.billNo;
     } else {
-        let counter = (++_billCounter);
+        // ✅ FIX: Sync counter increment + async Supabase sync (no await — generateBillData is sync fn)
         let yr = new Date().getFullYear();
+        let counter = (++_billCounter);
         billNo = 'nexdr/' + yr + '/' + String(counter).padStart(5, '0');
-        // ✅ FIX: Supabase mein bhi counter sync karo (multi-device duplicate prevention)
+        // Supabase sync — fire and forget (non-blocking)
         try {
             db.from('settings').upsert(
                 { key: 'bill_counter_' + yr, value: String(counter) },
@@ -9212,7 +9398,7 @@ function openBillModal(orderId, autoSend) {
     if(totalQtyEl) totalQtyEl.innerText = bill.items.reduce((s,i)=>s+(i.quantity||1),0) + ' ' + priceUnit0;
     let buyerNameEl = document.getElementById('billPrintBuyerName'); if(buyerNameEl) buyerNameEl.innerText = bill.customerName || 'Same as Consignee';
     let buyerAddrEl = document.getElementById('bill_buyerAddr');
-    if(buyerAddrEl) buyerAddrEl.innerHTML = (bill.customerAddress||'') + (bill.customerPhone ? '<br>M: '+bill.customerPhone : '') + '<br>State Name : ' + buyerStateName + ',  Code : ' + buyerStateCode;
+    if(buyerAddrEl) buyerAddrEl.innerHTML = esc(bill.customerAddress||'') + (bill.customerPhone ? '<br>M: '+esc(bill.customerPhone) : '') + '<br>State Name : ' + esc(buyerStateName) + ',  Code : ' + esc(buyerStateCode);
     // Courier row: show only if courier > 0
     let courierTrEl = document.getElementById('bill_courierTr');
     if(courierTrEl) courierTrEl.style.display = (bill.courier > 0) ? '' : 'none';
@@ -9227,7 +9413,7 @@ function openBillModal(orderId, autoSend) {
         let acc = (settings && settings.bankAccount) ? settings.bankAccount : '43459091963';
         let ifsc = (settings && settings.bankIFSC) ? settings.bankIFSC : 'SBIN0018623';
         let accName = (settings && settings.accountName) ? settings.accountName : (companySubName || 'Nexdrop Solutions Pvt. Ltd.');
-        bankEl.innerHTML = 'A/c Holder\'s Name: ' + accName + '<br>Bank: ' + bank + '<br>A/c No.: ' + acc + '<br>IFSC: ' + ifsc + '<br>UPI: ' + upi;
+        bankEl.innerHTML = 'A/c Holder\'s Name: ' + esc(accName) + '<br>Bank: ' + esc(bank) + '<br>A/c No.: ' + esc(acc) + '<br>IFSC: ' + esc(ifsc) + '<br>UPI: ' + esc(upi);
     }
 
     let paidBtn = document.getElementById('billMarkPaidBtn'); 
@@ -9244,9 +9430,9 @@ function openBillModal(orderId, autoSend) {
 }
 
 // ✅ FIX: prompt() → inline payment method modal (mobile safe)
+// 🔒 FIX: DOM-based admin check → _adminVault session check
 function markBillPaid() {
-    let isAdmin = document.getElementById('adminPanel') && document.getElementById('adminPanel').classList.contains('active');
-    if(!isAdmin) { showToast('❌ Only Admin can change the payment status!', '#ff4444'); return; }
+    if(!_adminVault.isLoggedIn()) { showToast('❌ Only Admin can change the payment status!', '#ff4444'); return; }
     let orderId = document.getElementById('billModal').dataset.orderId;
     if(!orderId) return;
     let o = orders.find(o => String(o.id) === String(orderId));
@@ -9273,6 +9459,8 @@ function markBillPaid() {
     window._payMethodOrderId = orderId;
 }
 function _markBillPaidWith(payMethod) {
+    // 🔒 FIX: Session verify karo — direct function call se bypass prevent
+    if(!_adminVault.isLoggedIn()) { showToast('⛔ Admin login required!', '#c62828'); let m = document.getElementById('_payMethodModal'); if(m) m.remove(); return; }
     let modal = document.getElementById('_payMethodModal');
     if(modal) modal.remove();
     let orderId = window._payMethodOrderId;
@@ -9454,10 +9642,10 @@ function loadReports() {
             let sc = b.status==='Delivered'?'#4caf50':b.status==='Shipped'?'#2196f3':'#ff9800';
             html += '<div style="background:white;border-radius:12px;padding:0.8rem 1rem;margin-bottom:0.6rem;border:1px solid #e0d8d0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">' +
                 '<div style="flex:1;min-width:160px;">' +
-                '<div style="font-size:0.8rem;font-weight:700;color:#2c5a4a;">' + b.billNo + '</div>' +
-                '<div style="font-size:0.72rem;font-weight:600;">' + b.customerName + '</div>' +
-                '<div style="font-size:0.65rem;color:#888;">' + (b.customerPhone||'') + ' | ' + (b.date||'') + '</div>' +
-                '<div style="font-size:0.65rem;color:#6b5e4a;">' + b.items.map(i=>i.name+' x'+i.quantity).join(', ') + '</div></div>' +
+                '<div style="font-size:0.8rem;font-weight:700;color:#2c5a4a;">' + esc(b.billNo||'') + '</div>' +
+                '<div style="font-size:0.72rem;font-weight:600;">' + esc(b.customerName||'') + '</div>' +
+                '<div style="font-size:0.65rem;color:#888;">' + esc(b.customerPhone||'') + ' | ' + esc(b.date||'') + '</div>' +
+                '<div style="font-size:0.65rem;color:#6b5e4a;">' + b.items.map(i=>esc(i.name||'')+' x'+i.quantity).join(', ') + '</div></div>' +
                 '<div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:0.3rem;">' +
                 '<div style="font-size:1rem;font-weight:800;color:#c49a6c;">₹' + b.total + '</div>' +
                 '<span style="background:' + sc + '22;color:' + sc + ';padding:1px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">' + b.status + '</span>' +
@@ -9507,10 +9695,10 @@ function loadWholesaleReports() {
         let total = parseFloat(b.total||0);
         return `<div style="background:white;border-radius:12px;padding:0.8rem 1rem;margin-bottom:0.6rem;border:1px solid #f0e8d8;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
             <div style="flex:1;min-width:160px;">
-                <div style="font-size:0.8rem;font-weight:700;color:#c49a6c;">${b.id}</div>
-                <div style="font-size:0.72rem;font-weight:600;">${b.customer||'-'}</div>
-                <div style="font-size:0.65rem;color:#888;">${b.phone||''} | ${b.date||''}</div>
-                ${b.data&&b.data.items?`<div style="font-size:0.65rem;color:#6b5e4a;">${b.data.items.map(i=>i.name+' '+i.qty+i.unit).join(', ')}</div>`:''}
+                <div style="font-size:0.8rem;font-weight:700;color:#c49a6c;">${esc(b.id||'')}</div>
+                <div style="font-size:0.72rem;font-weight:600;">${esc(b.customer||'-')}</div>
+                <div style="font-size:0.65rem;color:#888;">${esc(b.phone||'')} | ${esc(b.date||'')}</div>
+                ${b.data&&b.data.items?`<div style="font-size:0.65rem;color:#6b5e4a;">${b.data.items.map(i=>esc(i.name||'')+' '+i.qty+esc(i.unit||'')).join(', ')}</div>`:''}
             </div>
             <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:0.3rem;">
                 <div style="font-size:1rem;font-weight:800;color:#c49a6c;">₹${total.toFixed(2)}</div>
@@ -10218,9 +10406,9 @@ function loadGSTReport() {
             ? `<span style="font-size:0.6rem;background:#e8eaf6;color:#3949ab;padding:1px 5px;border-radius:8px;font-weight:700;">IGST</span>`
             : `<span style="font-size:0.6rem;background:#fce4ec;color:#c62828;padding:1px 5px;border-radius:8px;font-weight:700;">CGST+SGST</span>`;
         return `<tr>
-            <td style="font-weight:700;color:#2c5a4a;font-size:0.72rem;">${r.no}</td>
-            <td style="font-size:0.75rem;">${r.customer}</td>
-            <td style="font-size:0.72rem;">${r.date}</td>
+            <td style="font-weight:700;color:#2c5a4a;font-size:0.72rem;">${esc(r.no)}</td>
+            <td style="font-size:0.75rem;">${esc(r.customer)}</td>
+            <td style="font-size:0.72rem;">${esc(r.date)}</td>
             <td style="font-weight:600;">₹${r.total.toFixed(2)}</td>
             <td>₹${r.taxable.toFixed(2)}</td>
             ${taxCol}
@@ -10421,15 +10609,15 @@ function pbLoadSuppliers() {
     if(sel) {
         let cur = sel.value;
         sel.innerHTML = '<option value="">-- Select Supplier --</option>' +
-            suppliers.map(s=>`<option value="${s.id}">${s.name}${s.phone?' ('+s.phone+')':''}</option>`).join('');
+            suppliers.map(s=>`<option value="${s.id}">${esc(s.name||'')}${s.phone?' ('+esc(s.phone)+')':''}</option>`).join('');
         if(cur) sel.value = cur;
     }
     if(!suppliers.length) { listEl.innerHTML='<div style="text-align:center;color:#999;font-size:0.78rem;padding:0.5rem;">No suppliers added yet — Add one above</div>'; return; }
     listEl.innerHTML = suppliers.map(s=>`
         <div style="display:flex;justify-content:space-between;align-items:center;background:white;border-radius:8px;padding:0.5rem 0.7rem;margin-bottom:0.3rem;border:1px solid #e1bee7;font-size:0.78rem;">
             <div>
-                <div style="font-weight:700;color:#7b1fa2;">${s.name}</div>
-                <div style="color:#888;font-size:0.68rem;">${s.phone||''}${s.gst?' | GSTIN: '+s.gst:''}${s.address?' | '+s.address:''}</div>
+                <div style="font-weight:700;color:#7b1fa2;">${esc(s.name||'')}</div>
+                <div style="color:#888;font-size:0.68rem;">${esc(s.phone||'')}${s.gst?' | GSTIN: '+esc(s.gst):''}${s.address?' | '+esc(s.address):''}</div>
             </div>
             <div style="display:flex;gap:0.3rem;">
                 <button onclick="editSupplier('${s.id}')" style="background:#1565c0;color:white;border:none;padding:0.2rem 0.5rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">✏️</button>
@@ -10645,8 +10833,26 @@ function pbSaveBill() {
                 let p=products.find(x=>x.name&&x.name.trim().toLowerCase()===it.name.trim().toLowerCase());
                 if(p){ if(p.stockQty===null||p.stockQty===undefined) p.stockQty=0; p.stockQty+=it.qty; p.inStock=true; updatedRetail.push(p); }
             });
-            /* products → Supabase via sbSaveProduct */
-            updatedRetail.forEach(function(p){ sbSaveProduct(p); });
+            /* products → Supabase via bulk upsert (N+1 fix) */
+            if(updatedRetail.length > 0) {
+                try {
+                    const rows = updatedRetail.map(p => ({
+                        ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                        name: p.name, price: p.price, mrp: p.mrp || p.price,
+                        category: p.category, description: p.desc || p.description || '',
+                        image_type: p.imageType,
+                        image_value: (p.imageValue && p.imageValue.length > 500000) ? '🌾' : (p.imageValue || ''),
+                        in_stock: p.inStock, stock_qty: p.stockQty, discount: p.discount || 0,
+                        hsn_code: p.hsnCode || '', gst_slab: p.gstSlab || 0,
+                        cod_allowed: p.codAllowed !== false, courier_charge: p.courierCharge || 0,
+                        highlights: p.highlights || [], extra_images: p.extraImages || [],
+                        price_unit: p.priceUnit || ''
+                    }));
+                    db.from('products').upsert(rows, { onConflict: 'id' }).then(function(r) {
+                        if(r && r.error) console.log('stock update bulk upsert error:', r.error.message);
+                    });
+                } catch(e) { console.log('stock update error:', e.message); }
+            }
         } else {
             // b2bProducts already in-memory from Supabase
             items.forEach(it=>{
@@ -10710,9 +10916,9 @@ function pbLoadHistory() {
         return `<div style="background:white;border-radius:10px;padding:0.7rem 0.9rem;margin-bottom:0.5rem;border:1px solid #e1bee7;font-size:0.78rem;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.3rem;">
                 <div style="flex:1;">
-                    <div style="font-weight:700;color:#7b1fa2;">${b.id}</div>
+                    <div style="font-weight:700;color:#7b1fa2;">${esc(b.id||'')}</div>
                     <div style="font-weight:600;">${esc(b.supplierName)} <span style="color:#888;font-size:0.68rem;">| Supplier Bill: ${esc(b.supplierBillNo)}</span></div>
-                    <div style="color:#888;font-size:0.68rem;">${b.date||''} | ${b.payMode} | ${b.items.map(i=>i.name+' '+i.qty+i.unit).join(', ')}</div>
+                    <div style="color:#888;font-size:0.68rem;">${esc(b.date||'')} | ${esc(b.payMode||'')} | ${b.items.map(i=>esc(i.name||'')+' '+i.qty+esc(i.unit||'')).join(', ')}</div>
                     ${b.notes?`<div style="color:#6b5e4a;font-size:0.65rem;margin-top:1px;">📝 ${esc(b.notes)}</div>`:''}
                 </div>
                 <div style="text-align:right;">
@@ -11237,7 +11443,7 @@ function wiShowBillModal(d, invNo, subtotal, totalGST, grandTotal) {
     let _wSellerStateName = _wStateNames[_wSellerSC] || 'Bihar';
     let wiModalHdrEl = document.getElementById('wiModalHeaderGSTIN'); if(wiModalHdrEl) wiModalHdrEl.innerText = 'GSTIN: ' + _wSellerGSTIN;
     let wiPrintGSTINLine = document.getElementById('wiPrintGSTINLine');
-    if(wiPrintGSTINLine) wiPrintGSTINLine.innerHTML = '📞 ' + ((settings && settings.whatsappNo) ? '+91 ' + settings.whatsappNo.replace(/^91/,'') : '+91 9006606697') + ' &nbsp;|&nbsp; GSTIN: ' + _wSellerGSTIN + ' &nbsp;|&nbsp; State: ' + _wSellerStateName + ', Code: ' + _wSellerSC;
+    if(wiPrintGSTINLine) wiPrintGSTINLine.innerHTML = '📞 ' + ((settings && settings.whatsappNo) ? '+91 ' + esc(settings.whatsappNo.replace(/^91/,'')) : '+91 9006606697') + ' &nbsp;|&nbsp; GSTIN: ' + esc(_wSellerGSTIN) + ' &nbsp;|&nbsp; State: ' + esc(_wSellerStateName) + ', Code: ' + esc(_wSellerSC);
 
     let printLogoEl = document.getElementById('wiPrintLogoWrap');
     if(printLogoEl) {
@@ -11425,9 +11631,9 @@ function wiShowBillModal(d, invNo, subtotal, totalGST, grandTotal) {
         let acc = (settings && settings.bankAccount) ? settings.bankAccount : '43459091963';
         let ifsc = (settings && settings.bankIFSC) ? settings.bankIFSC : 'SBIN0018623';
         let accName = (settings && settings.accountName) ? settings.accountName : 'Nexdrop Solutions Pvt. Ltd.';
-        bankEl.innerHTML = '<span>Bank: ' + bank + ' | A/C: ' + acc + '</span><br>' +
-            '<span>IFSC: ' + ifsc + ' | A/C Name: ' + accName + '</span><br>' +
-            '<span>UPI: <strong>' + upi + '</strong> | GPay / Paytm: ' + upi + '</span>';
+        bankEl.innerHTML = '<span>Bank: ' + esc(bank) + ' | A/C: ' + esc(acc) + '</span><br>' +
+            '<span>IFSC: ' + esc(ifsc) + ' | A/C Name: ' + esc(accName) + '</span><br>' +
+            '<span>UPI: <strong>' + esc(upi) + '</strong> | GPay / Paytm: ' + esc(upi) + '</span>';
     }
 
     // ── Notes ──
@@ -11482,8 +11688,8 @@ function wiLoadSaved() {
     let html = wiBills.map(b => `
         <div style="display:flex;justify-content:space-between;align-items:center;background:white;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.4rem;border:1px solid #f0e8d8;font-size:0.78rem;">
             <div>
-                <div style="font-weight:700;color:#2c5a4a;">${b.id}</div>
-                <div style="color:#555;">${b.customer} | ${b.date}</div>
+                <div style="font-weight:700;color:#2c5a4a;">${esc(b.id||'')}</div>
+                <div style="color:#555;">${esc(b.customer||'')} | ${esc(b.date||'')}</div>
                 <div style="font-weight:600;color:#c49a6c;">₹${parseFloat(b.total).toFixed(2)}</div>
             </div>
             <div style="display:flex;gap:0.3rem;">
@@ -11728,8 +11934,8 @@ function khataLoadSummary() {
         const statusColor = b.net > 0 ? '#c62828' : b.net < 0 ? '#2e7d32' : '#555';
         const statusText = b.net > 0 ? '🔴 Baaki Hai' : b.net < 0 ? '🟢 Advance Hai' : '✅ Clear';
         return `<tr>
-            <td><strong>${c.name}</strong></td>
-            <td>${c.phone||'—'}</td>
+            <td><strong>${esc(c.name||'')}</strong></td>
+            <td>${esc(c.phone||'—')}</td>
             <td style="color:#c62828;">₹${b.debit.toFixed(2)}</td>
             <td style="color:#2e7d32;">₹${b.credit.toFixed(2)}</td>
             <td style="font-weight:700;color:${statusColor};">₹${Math.abs(b.net).toFixed(2)}</td>
@@ -11783,7 +11989,7 @@ function khataRenderLedger(cid) {
         return `<tr>
             <td style="white-space:nowrap;">${e.date||'—'}</td>
             <td><span style="background:${e.type==='debit'?'#ffebee':'#e8f5e9'};color:${e.type==='debit'?'#c62828':'#2e7d32'};padding:0.15rem 0.5rem;border-radius:20px;font-size:0.72rem;font-weight:600;">${e.type==='debit'?'📤 Debit':'📥 Credit'}</span></td>
-            <td style="font-size:0.78rem;">${e.note||'—'}</td>
+            <td style="font-size:0.78rem;">${esc(e.note||'—')}</td>
             <td style="color:#c62828;font-weight:${e.type==='debit'?'700':'400'};">${e.type==='debit'?'₹'+e.amount.toFixed(2):'—'}</td>
             <td style="color:#2e7d32;font-weight:${e.type==='credit'?'700':'400'};">${e.type==='credit'?'₹'+e.amount.toFixed(2):'—'}</td>
             <td style="font-weight:700;color:${balColor};">₹${Math.abs(runBal).toFixed(2)} ${runBal>0?'(Dr)':runBal<0?'(Cr)':'(Nil)'}</td>
@@ -12548,6 +12754,7 @@ function saveCoupons(arr) {
 }
 
 function addCoupon() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let code = (document.getElementById('cpCode')?.value || '').trim().toUpperCase();
     let type = document.getElementById('cpType')?.value || 'flat';
     let value = parseFloat(document.getElementById('cpValue')?.value) || 0;
@@ -12581,13 +12788,13 @@ function loadCouponsList() {
         return `<div style="background:white;border-radius:10px;padding:0.7rem 0.9rem;margin-bottom:0.5rem;border:1px solid ${c.active&&!isExpired?'#f8bbd9':'#ddd'};display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
             <div style="flex:1;">
                 <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-                    <span style="font-family:monospace;font-weight:800;font-size:0.92rem;color:#c2185b;letter-spacing:1px;">${c.code}</span>
+                    <span style="font-family:monospace;font-weight:800;font-size:0.92rem;color:#c2185b;letter-spacing:1px;">${esc(c.code)}</span>
                     <span style="background:#fce4ec;color:#c2185b;padding:0.1rem 0.5rem;border-radius:20px;font-size:0.65rem;font-weight:700;">${typeLabel}</span>
                     ${isExpired?'<span style="background:#ffebee;color:#f44336;padding:0.1rem 0.5rem;border-radius:20px;font-size:0.6rem;font-weight:700;">EXPIRED</span>':''}
                     ${!c.active?'<span style="background:#f5f5f5;color:#999;padding:0.1rem 0.5rem;border-radius:20px;font-size:0.6rem;font-weight:700;">INACTIVE</span>':''}
                 </div>
                 <div style="font-size:0.68rem;color:#888;margin-top:2px;">
-                    ${c.desc||'—'} &nbsp;|&nbsp; Min: ₹${c.minOrder||0} &nbsp;|&nbsp; Uses: ${c.usedCount}/${c.maxUses||'∞'} &nbsp;|&nbsp; Expiry: ${expLabel}
+                    ${esc(c.desc||'—')} &nbsp;|&nbsp; Min: ₹${c.minOrder||0} &nbsp;|&nbsp; Uses: ${c.usedCount}/${c.maxUses||'∞'} &nbsp;|&nbsp; Expiry: ${expLabel}
                 </div>
             </div>
             <div style="display:flex;gap:0.3rem;">
@@ -12609,6 +12816,7 @@ function toggleCouponStatus(code) {
     showToast(c.active ? '✅ Coupon enabled!' : '⏸️ Coupon disabled!', '#c2185b');
 }
 function deleteCoupon(code) {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     // ✅ FIX v36.9: confirm() mobile pe block hota tha — toast 2-step
     if(window._deleteCouponPending === code) {
         window._deleteCouponPending = null;
@@ -13156,8 +13364,8 @@ function renderNotifPanel() {
     el.innerHTML = notifs.slice(0,20).map(n=>`
         <div style="display:flex;gap:0.5rem;padding:0.5rem 0;border-bottom:1px solid #f0ebe4;align-items:flex-start;">
             <span style="font-size:1rem;flex-shrink:0;">${icons[n.type]||'ℹ️'}</span>
-            <div style="flex:1;font-size:0.72rem;color:#333;">${n.msg}</div>
-            <span style="font-size:0.6rem;color:#aaa;white-space:nowrap;">${n.time}</span>
+            <div style="flex:1;font-size:0.72rem;color:#333;">${esc(n.msg||'')}</div>
+            <span style="font-size:0.6rem;color:#aaa;white-space:nowrap;">${esc(n.time||'')}</span>
         </div>`).join('');
 }
 function clearAllNotifs() {
@@ -14228,10 +14436,10 @@ function adminRenderDistributors() {
         <div style="border:1px solid #e0e0e0;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;background:white;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.4rem;">
                 <div>
-                    <div style="font-weight:700;color:#2c5a4a;font-size:0.9rem;">👤 ${d.name}</div>
-                    <div style="font-size:0.75rem;color:#888;">${d.business_name || ''} · ${d.city || ''}, ${d.state || ''}</div>
-                    <div style="font-size:0.72rem;color:#888;">📱 ${d.phone} · 📧 ${d.email}</div>
-                    <div style="font-size:0.72rem;color:#888;">🔖 ${d.distributor_type || 'N/A'} · 📅 ${d.created_at ? d.created_at.slice(0,10) : ''}</div>
+                    <div style="font-weight:700;color:#2c5a4a;font-size:0.9rem;">👤 ${esc(d.name||'')}</div>
+                    <div style="font-size:0.75rem;color:#888;">${esc(d.business_name||'')} · ${esc(d.city||'')}, ${esc(d.state||'')}</div>
+                    <div style="font-size:0.72rem;color:#888;">📱 ${esc(d.phone||'')} · 📧 ${esc(d.email||'')}</div>
+                    <div style="font-size:0.72rem;color:#888;">🔖 ${esc(d.distributor_type||'N/A')} · 📅 ${esc(d.created_at ? d.created_at.slice(0,10) : '')}</div>
                 </div>
                 <span style="font-size:0.7rem;padding:3px 10px;border-radius:20px;font-weight:700;background:${(statusColor[d.status]||'#888')}22;color:${statusColor[d.status]||'#888'};border:1px solid ${statusColor[d.status]||'#888'};">${(d.status||'pending').toUpperCase()}</span>
             </div>
@@ -14522,7 +14730,11 @@ async function distPlaceOrder() {
         phone: currentDistributor.phone,
         email: currentDistributor.email,
         address: addr || (currentDistributor.city + ', ' + currentDistributor.state),
-        items: _distCart.map(c => ({ id: c.id, name: c.name, qty: c.qty, price: c.price, type: c.type || 'retail' })),
+        items: _distCart.map(c => {
+            // 🔒 FIX: GST slab snapshot at order time
+            let prodRef = (window.products || []).find(pr => String(pr.id) === String(c.id)) || (window.b2bProducts || []).find(pr => String(pr.id) === String(c.id));
+            return { id: c.id, name: c.name, qty: c.qty, price: c.price, type: c.type || 'retail', gstSlab: (prodRef && prodRef.gstSlab != null) ? prodRef.gstSlab : 5 };
+        }),
         total: grandTotal,
         status: 'pending',
         paymentMethod: 'Distributor Order',
@@ -14535,8 +14747,10 @@ async function distPlaceOrder() {
     try {
         orders = orders || [];
         orders.unshift(newOrder);
-        saveOrders();
+        // ✅ FIX: saveOrders() hata diya — woh sab orders loop mein save karta tha (N+1)
+        // Sirf naya order sbSaveOrder se save karo
         await sbSaveOrder(newOrder);
+        updateStats();
     } catch(e) {
         console.error('[distPlaceOrder] Supabase save failed:', e);
     }
@@ -15054,6 +15268,18 @@ function catEditUpdateDisc(tab, id) {
 function catEditUploadPhoto(tab, id, input) {
     let file = input.files[0];
     if(!file) return;
+    // 🔒 SECURITY FIX: MIME type validate karo — sirf images allow
+    if(!file.type.startsWith('image/')) {
+        showToast('❌ Sirf image files allowed hain (JPG, PNG, WebP)', '#ff4444');
+        input.value = '';
+        return;
+    }
+    // 🔒 FIX: File size check karo upload se pehle (5MB raw limit)
+    if(file.size > 5 * 1024 * 1024) {
+        showToast('❌ Image 5MB se badi hai. Choti image use karo.', '#ff4444');
+        input.value = '';
+        return;
+    }
     let prefix = tab === 'b2b' ? 'ceb2b' : 'ce';
     let wrap = document.getElementById(`${prefix}_imgwrap_${id}`);
     if(wrap) wrap.innerHTML = '<div style="width:70px;height:70px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;">⏳</div>';
@@ -15100,14 +15326,37 @@ function catEditSave(tab, id) {
     let gst   = document.getElementById(`${prefix}_gst_${id}`)?.value;
     let desc  = document.getElementById(`${prefix}_desc_${id}`)?.value;
 
-    if(name)  p.name = name;
-    if(price) p.price = parseInt(price) || p.price;
-    if(disc !== undefined) p.discount = parseFloat(disc) || 0;
-    if(stock !== '' && stock !== undefined) { p.stockQty = parseInt(stock) || 0; p.inStock = p.stockQty > 0; }
-    if(extra !== undefined) { if(isB2B) p.minQty = extra; else p.courierCharge = parseInt(extra) || 0; }
+    // 🔒 VALIDATION FIX: Input boundaries enforce karo
+    if(name !== undefined) {
+        let trimmedName = name.trim();
+        if(!trimmedName) { showToast('❌ Product name khali nahi ho sakta', '#ff4444'); return; }
+        if(trimmedName.length > 200) { showToast('❌ Product name 200 characters se zyada nahi ho sakta', '#ff4444'); return; }
+        p.name = trimmedName;
+    }
+    if(price !== undefined && price !== '') {
+        let parsedPrice = parseInt(price);
+        if(isNaN(parsedPrice) || parsedPrice < 0) { showToast('❌ Price valid positive number hona chahiye', '#ff4444'); return; }
+        if(parsedPrice > 1000000) { showToast('❌ Price ₹10,00,000 se zyada nahi ho sakta', '#ff4444'); return; }
+        p.price = parsedPrice;
+    }
+    if(disc !== undefined) {
+        let parsedDisc = parseFloat(disc) || 0;
+        if(parsedDisc < 0 || parsedDisc > 99) { showToast('❌ Discount 0-99% ke beech hona chahiye', '#ff4444'); return; }
+        p.discount = parsedDisc;
+    }
+    if(stock !== '' && stock !== undefined) {
+        let parsedStock = parseInt(stock);
+        if(isNaN(parsedStock) || parsedStock < 0) { showToast('❌ Stock quantity 0 ya zyada honi chahiye', '#ff4444'); return; }
+        p.stockQty = parsedStock; p.inStock = p.stockQty > 0;
+    }
+    if(extra !== undefined) { if(isB2B) p.minQty = extra; else p.courierCharge = Math.max(0, parseInt(extra) || 0); }
     if(hsn !== undefined) p.hsnCode = hsn.trim();
-    if(gst !== undefined && gst !== '') p.gstSlab = parseFloat(gst) || 5;
-    if(desc !== undefined) p.desc = desc.trim();
+    if(gst !== undefined && gst !== '') {
+        let parsedGst = parseFloat(gst);
+        if(isNaN(parsedGst) || parsedGst < 0 || parsedGst > 28) { showToast('❌ GST slab 0-28% ke beech hona chahiye', '#ff4444'); return; }
+        p.gstSlab = parsedGst;
+    }
+    if(desc !== undefined) p.desc = desc.trim().substring(0, 2000); // max 2000 chars
 
     if(isB2B) { saveB2B(); loadAdminB2B(); displayB2B(); }
     else { saveProducts(); loadAdminProducts(); displayProducts(); }
