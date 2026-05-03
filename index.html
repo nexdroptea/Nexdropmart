@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.9 applied | v39.0 — 4 Admin Distributor Features: (1) Payments Verification sub-tab — confirm/reject distributor payments; (2) Support Tickets sub-tab — admin reply + status update; (3) Credit Limit set per-distributor (distributors.credit_limit); (4) Manual Ledger debit/credit + outstanding auto-update | v36.20.3 below -->
+<!-- 🔒 SECURITY PATCH v2.9 applied | v41.1 BUG FIX AUDIT: [M-1] Forgot password brute force guard added; [M-2] Name-based order matching removed (6 locations, privacy leak); [M-3] _userLoginGuard moved before usage (TDZ fix); [M-4] settings.adminUsername leak removed; [M-5] in-memory password hash sync removed; [L-2] setInterval max retry (×4 patches); [C-3] unsafe-eval removed from CSP | v41.0 SECURITY AUDIT FIXES below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -9,7 +9,8 @@
 <!-- 🔒 FIX #6: Referrer policy — sensitive URLs leak band karo -->
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <!-- 🔒 FIX #CSP: Content Security Policy — XSS injection block karo -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self' https://*.supabase.co https://wa.me https://api.qrserver.com; img-src 'self' data: blob: https:; font-src 'self' data:;">
+<!-- 🔒 FIX C-3: unsafe-eval removed — eval() is unused, removing reduces attack surface -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline' data: blob:; connect-src 'self' https://*.supabase.co https://wa.me https://api.qrserver.com; img-src 'self' data: blob: https:; font-src 'self' data:;">
 <!-- ✅ NO CDN — Native fetch() based Supabase client (file:// protocol compatible) -->
 <script>
 // ============================================================
@@ -208,10 +209,10 @@ const db = (function() {
 // Keys jo sirf device pe rahni chahiye — Supabase mein push NAHI honge
 // ✅ ONLY session, UI preference, aur device-specific keys yahan hain
 // Data keys (products, orders, users etc.) Supabase mein ZAROOR jayenge
+// ✅ rls_dismissed localStorage → sessionStorage mein move ho gaya (localStorage zero)
 const _LOCAL_ONLY_KEYS = new Set([
     'nexdrop_user',         // current user session (device specific)
     'nexdrop_dark',         // dark mode preference (device specific)
-    'rls_dismissed',        // UI banner dismiss (device specific)
 ]);
 function _isLocalOnly(key) {
     if(!key) return true;
@@ -346,9 +347,10 @@ async function sbLoadProducts() {
 
 async function _sbLoadProductImages(ids) {
     try {
-        const { data, error } = await sbSafeQuery(() =>
-            db.from('products').select('id,image_type,image_value').order('id')
-        );
+        // ✅ FIX v39.5: ids filter laagao — sirf requested products ki images fetch karo (was fetching all)
+        let query = db.from('products').select('id,image_type,image_value').order('id');
+        if(ids && ids.length) query = db.from('products').select('id,image_type,image_value').in('id', ids).order('id');
+        const { data, error } = await sbSafeQuery(() => query);
         if(error || !data) return;
         let updated = false;
         data.forEach(row => {
@@ -550,14 +552,14 @@ async function sbSaveBill(bill) {
 }
 
 async function sbLoadBills() {
-    // ✅ FIX: bills table optional hai — agar exist nahi karta toh silently localStorage use karo
+    // ✅ FIX: bills table optional hai — agar exist nahi karta toh silently in-memory bills use karo
     try {
         let result;
         try {
             result = await db.from('bills').select('*').order('date', {ascending: false});
         } catch(fetchErr) {
             // DataCloneError ya network error — silently fallback
-            console.log('sbLoadBills: Supabase fetch skipped, localStorage use hoga.');
+            console.log('sbLoadBills: Supabase fetch skipped, in-memory bills use honge.');
             // ✅ FIX Audit: bl variable nahi hai — in-memory bills use karo
             return;
         }
@@ -565,7 +567,7 @@ async function sbLoadBills() {
         // Table missing (42P01) ya koi aur DB error — silently skip
         if (error) {
             if (error.code === '42P01' || (error.message && error.message.includes('does not exist'))) {
-                console.log('sbLoadBills: bills table nahi hai — localStorage fallback.');
+                console.log('sbLoadBills: bills table nahi hai — in-memory fallback.');
             } else {
                 console.log('sbLoadBills error:', error.message);
             }
@@ -601,12 +603,11 @@ async function sbLoadBills() {
             /* bills sync → Supabase (done via saveBills/sbSaveBill) */
             console.log('✅ ' + bills.length + ' bills Supabase se load hue!');
         } else {
-            // Supabase mein koi bills nahi — localStorage check karo
-            // ✅ FIX Audit: bl variable nahi hai — in-memory bills use karo
+            // Supabase mein koi bills nahi — in-memory empty array use hoga
         }
     } catch(e) {
-        // Any other unexpected error — silent fallback
-        console.log('sbLoadBills unexpected error, localStorage use hoga:', e.message || e);
+        // Any other unexpected error — silent fallback (in-memory bills use honge)
+        console.log('sbLoadBills unexpected error:', e.message || e);
     }
 }
 
@@ -813,6 +814,7 @@ async function initSupabase() {
                     return {
                         code: c.code, type: c.type || 'flat', value: c.value || 0,
                         minOrder: c.min_order || 0, maxUses: c.max_uses || 0,
+                        perUserLimit: c.per_user_limit || 0, // ✅ BUG#3 FIX v39.4
                         usedCount: c.used_count || 0, expiry: c.expiry || '',
                         desc: c.description || '', active: c.active !== false,
                         createdAt: c.created_at || new Date().toISOString()
@@ -825,7 +827,7 @@ async function initSupabase() {
     ]);
     // ✅ FIX v37: 'bl' stale localStorage reference hata diya — localStorage disabled hai, in-memory use karo
     // if(!bills || !bills.length) — bills Supabase se load hote hain sbLoadBills() mein
-    // ✅ FIX v36: B2B array pehle Supabase settings table se load karo, localStorage sirf fallback
+    // ✅ v40: B2B array Supabase settings table se load karo (primary source)
     try {
         const { data: b2Data, error: b2Err } = await db.from('settings').select('value').eq('key', 'nexdrop_b2b').maybeSingle();
         if (!b2Err && b2Data && b2Data.value) {
@@ -844,7 +846,7 @@ async function initSupabase() {
         }
     } catch(e) {
         // b2bProducts already in-memory from Supabase
-        console.warn('B2B Supabase load failed, using localStorage:', e.message);
+        console.warn('B2B Supabase load failed, in-memory default use hoga:', e.message);
     }
     // settings loaded from Supabase in loadData()
     // currentUser is in-memory (set during login)
@@ -959,12 +961,13 @@ async function initSupabase() {
             settings.qrCodeImage = qrRes.value;
             console.log('✅ Admin QR code Supabase se load hua!');
         }
-        // ✅ FIX v23: Units Supabase se load karo
+        // ✅ FIX v39.2: Units Supabase se load + _retailUnits/_wholesaleUnits assign karo
+        // (pehle fetch hota tha lekin assign nahi hota tha — dead code fix)
         const { data: rUnitsRes, error: rUnitsErr } = await db.from('settings').select('value').eq('key', 'nexdrop_retail_units').maybeSingle();
         if(!rUnitsErr && rUnitsRes && rUnitsRes.value) {
             let arr = typeof rUnitsRes.value === 'string' ? JSON.parse(rUnitsRes.value) : rUnitsRes.value;
             if(Array.isArray(arr) && arr.length > 0) {
-                /* retail units → in-memory */
+                _retailUnits = arr; // ✅ FIX: assign karo
                 console.log('✅ Retail units Supabase se load hue:', arr.length);
             }
         }
@@ -972,34 +975,17 @@ async function initSupabase() {
         if(!wUnitsErr && wUnitsRes && wUnitsRes.value) {
             let arr = typeof wUnitsRes.value === 'string' ? JSON.parse(wUnitsRes.value) : wUnitsRes.value;
             if(Array.isArray(arr) && arr.length > 0) {
-                /* wholesale units → in-memory */
+                _wholesaleUnits = arr; // ✅ FIX: assign karo
                 console.log('✅ Wholesale units Supabase se load hue:', arr.length);
             }
         }
     } catch(e) {
-        console.log('Reviews/Suppliers/WI load failed, localStorage fallback:', e.message);
+        console.log('Reviews/Suppliers/WI load failed:', e.message);
     }
 
-    // ✅ Admin credentials Supabase se load karo (settings table)
-    // 🔒 FIX #1: Sirf username load karo — password memory mein store NAHI hoga
-    try {
-        const { data: adminCred, error: adminCredErr } = await db
-            .from('settings')
-            .select('value')
-            .eq('key', 'admin_credentials')
-            .maybeSingle(); // ✅ FIX: .single() → .maybeSingle()
-        if (!adminCredErr && adminCred && adminCred.value) {
-            let creds = typeof adminCred.value === 'string'
-                ? JSON.parse(adminCred.value)
-                : adminCred.value;
-            // 🔒 Only store username for display purposes — password never in memory
-            if (creds.username) settings.adminUsername = creds.username;
-            // settings.adminPassword deliberately NOT set here
-            /* [security log removed] */;
-        }
-    } catch(e) {
-        /* SECURITY: console.log('Admin credentials load failed:', e.message) */;
-    }
+    // 🔒 FIX M-4: Admin credentials startup load removed
+    // adminUsername display purpose ke liye bhi global settings mein nahi hona chahiye
+    // Admin identity _adminVault session se manage hoti hai — yahan kuch nahi chahiye
 
         updateStats();
     displayProducts();
@@ -1007,6 +993,18 @@ async function initSupabase() {
     if(typeof displayHomeProducts === 'function') displayHomeProducts(); // ✅ FIX: Home page grid update karo
     if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay();
     renderHomepageReviews(); // Page load par approved reviews dikhao
+
+    // ✅ FIX: Page refresh ke baad user session sessionStorage se restore karo
+    try {
+        const _savedUser = sessionStorage.getItem('nexdrop_current_user');
+        if(_savedUser && !currentUser) {
+            currentUser = JSON.parse(_savedUser);
+            sbLoadUserCart();
+            sbLoadSavedItems();
+            console.log('✅ User session restored after refresh:', currentUser.email);
+        }
+    } catch(e) { console.log('User session restore failed:', e.message); }
+
     console.log('✅ Supabase data loaded!');
 }
 
@@ -1101,7 +1099,25 @@ function genOrderId() {
 const _adminVault = (function() {
     let _sessionToken = null;
     let _tokenExpiry = 0;
-    const TOKEN_DURATION = 4 * 60 * 60 * 1000; // 4 hours
+    const TOKEN_DURATION = 4 * 60 * 60 * 1000; // 4 hours max
+    // 🔒 FIX: 30-min idle auto-logout
+    const IDLE_DURATION = 30 * 60 * 1000; // 30 minutes
+    let _idleTimer = null;
+    function _resetIdle() {
+        clearTimeout(_idleTimer);
+        _idleTimer = setTimeout(function() {
+            if(_sessionToken) {
+                _sessionToken = null; _tokenExpiry = 0;
+                try { sessionStorage.removeItem('_adm_st'); } catch(e) {}
+                if(typeof showToast === 'function') showToast('⏰ Admin session timeout — 30 min idle. Please login again.', '#c62828');
+                if(typeof closeAdminPanel === 'function') closeAdminPanel();
+            }
+        }, IDLE_DURATION);
+    }
+    // Activity events pe idle reset karo
+    ['click','keydown','mousemove','touchstart'].forEach(function(ev) {
+        document.addEventListener(ev, function() { if(_sessionToken) _resetIdle(); }, { passive: true });
+    });
 
     return {
         // Session token set karo (only after successful login verification)
@@ -1118,6 +1134,7 @@ const _adminVault = (function() {
             _sessionToken = token;
             _tokenExpiry = Date.now() + TOKEN_DURATION;
             try { sessionStorage.setItem('_adm_st', _sessionToken + '|' + _tokenExpiry); } catch(e) {}
+            _resetIdle(); // 🔒 FIX: Idle timer start on login
         },
         // Token valid hai?
         isLoggedIn: function() {
@@ -1130,6 +1147,7 @@ const _adminVault = (function() {
                     if (tok && Date.now() < parseInt(exp)) {
                         _sessionToken = tok;
                         _tokenExpiry = parseInt(exp);
+                        _resetIdle(); // 🔒 FIX: Restore pe bhi idle timer start
                         return true;
                     }
                 }
@@ -1140,6 +1158,7 @@ const _adminVault = (function() {
         invalidate: function() {
             _sessionToken = null;
             _tokenExpiry = 0;
+            clearTimeout(_idleTimer);
             try { sessionStorage.removeItem('_adm_st'); } catch(e) {}
         }
     };
@@ -2132,6 +2151,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <div class="nav-right">
             <!-- Admin button removed from public view — use Ctrl+Shift+A to access -->
             <a href="#" class="user-btn" onclick="openUserPanel(); return false;">👤</a>
+
             <button class="menu-icon" onclick="toggleNav()" id="menuBtn">☰</button>
         </div>
     </div>
@@ -2198,14 +2218,14 @@ body.dark-mode .nav-links { background: #121a18 !important; }
       var p=item.data;
       var discPrice=Math.round(p.price-(p.price*(p.discount||0)/100));
       var imgHtml=(p.imageType==='upload'&&p.imageValue)
-        ?'<img class="psc-card-img" data-src="'+p.imageValue+'" src="data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 1 1\'%3E%3C/svg%3E" alt="'+p.name+'" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.3s;" onload="this.style.opacity=1">'
+        ?'<img class="psc-card-img" data-src="'+p.imageValue+'" src="data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 1 1\'%3E%3C/svg%3E" alt="'+esc(p.name)+'" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.3s;" onload="this.style.opacity=1">'
         :'<div class="psc-card-img-emoji">'+(p.imageValue||'🌾')+'</div>';
       html+='<div class="psc-card" onclick="openProductModal(\''+item.type+'\','+p.id+')">'
         +imgHtml+'<div class="psc-card-info">'
-        +(p.discount>0?'<div class="psc-card-badge">'+p.discount+'% OFF</div>':'')
-        +'<div class="psc-card-name">'+p.name+'</div>'
-        +'<div><span class="psc-card-price">₹'+discPrice+'</span>'
-        +(p.discount>0?'<span class="psc-card-orig">₹'+p.price+'</span>':'')
+        +(p.discount>0?'<div class="psc-card-badge">'+Number(p.discount)+'% OFF</div>':'')
+        +'<div class="psc-card-name">'+esc(p.name)+'</div>'
+        +'<div><span class="psc-card-price">₹'+Number(discPrice)+'</span>'
+        +(p.discount>0?'<span class="psc-card-orig">₹'+Number(p.price)+'</span>':'')
         +'</div></div></div>';
     });
     track.innerHTML=html;
@@ -3766,7 +3786,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
               A/c Holder's Name : Nexdrop Solutions Pvt. Ltd.<br>
               Bank Name : State Bank of India<br>
               A/c No. : 43459091963<br>
-              Branch &amp; IFS Code : SBIN0001234<br>
+              Branch &amp; IFS Code : SBIN0018623<br>
               UPI : 43459091963@sbi
             </div>
           </td>
@@ -3964,7 +3984,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
             <div id="wi_bankDetails" style="color:#444;line-height:1.6;margin-top:0.2rem;">
               A/c Holder's Name: Nexdrop Solutions Pvt. Ltd.<br>
               Bank: State Bank of India<br>
-              A/c No.: 32XXXXXXXX1234<br>
+              A/c No.: 43459091963<br>
               IFSC: SBIN0018623<br>
               UPI: 43459091963@sbi
             </div>
@@ -4028,9 +4048,9 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     Enable RLS policies on <strong>products, orders, users, bills, coupons, settings</strong> tables in your Supabase dashboard — otherwise anyone can read/write your data.<br>
     <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" style="color:#1565c0;font-weight:600;">📖 Supabase RLS Guide →</a>
   </div>
-  <button onclick="document.getElementById('rlsWarningBanner').style.display='none';localStorage.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
+  <button onclick="document.getElementById('rlsWarningBanner').style.display='none';sessionStorage.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
 </div>
-<script>if(localStorage.getItem('rls_dismissed')==='1'){var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none';}</script>
+<script>if(sessionStorage.getItem('rls_dismissed')==='1'){var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none';}</script>
 
 <div class="admin-stats">
 <div class="stat-card"><div class="stat-number" id="statProducts">0</div><div>Products</div></div>
@@ -4122,6 +4142,10 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <div>
           <label style="font-size:0.68rem;font-weight:600;color:#888;">Max Uses</label>
           <input type="number" id="cpMaxUses" placeholder="0 = unlimited" min="0" style="width:100%;padding:0.4rem 0.6rem;border:1px solid #ddd;border-radius:8px;font-size:0.78rem;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:0.68rem;font-weight:600;color:#888;">Per User Limit</label>
+          <input type="number" id="cpPerUserLimit" placeholder="0 = unlimited" min="0" style="width:100%;padding:0.4rem 0.6rem;border:1px solid #ddd;border-radius:8px;font-size:0.78rem;box-sizing:border-box;" title="Ek user kitni baar use kar sakta hai">
         </div>
         <div>
           <label style="font-size:0.68rem;font-weight:600;color:#888;">Expiry Date</label>
@@ -5565,7 +5589,7 @@ var defaultProductImages = {
     8: "https://images.pexels.com/photos/1431671/pexels-photo-1431671.jpeg?auto=compress&cs=tinysrgb&w=600"
 };
 function loadData() {
-    // Supabase se load karo (async) with localStorage fallback
+    // ✅ v40: Supabase se load karo (async) — no localStorage fallback
     initSupabase().then(function() {
         // ✅ v31: initSupabase complete — products bhi load ho gaye, ab categories refresh karo
         // Small delay taaki DOM bhi ready ho
@@ -5970,10 +5994,8 @@ function buildRetailCard(p) {
     let imgHtml = p.imageType === 'upload' && p.imageValue
         ? `<img data-src="${p.imageValue}" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.3s;" onload="this.style.opacity=1">`
         : `<span style="font-size:3rem;">${p.imageValue}</span>`;
-    let stockBadge = '';
-    if(!p.inStock || p.stockQty === 0) stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">❌ Out of Stock</div>';
-    else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 5) stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">🔥 Only ' + p.stockQty + ' left!</div>';
-    else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10) stockBadge = '<div style="font-size:0.65rem;color:#ff9800;font-weight:700;margin:2px 0;">⚡ Only ' + p.stockQty + ' remaining</div>';
+    // ✅ FIX: getStockBadge() use karo — consistent stock display
+    let stockBadge = getStockBadge(p);
     let discBadgeHtml = p.discount > 0 ? `<div class="product-badge" style="background:#ff4444;">${p.discount}% OFF</div>` : '';
     // 🔒 FIX XSS: p.name, p.category, p.desc, p.priceUnit — esc() se sanitize karo
     let safeName = esc(p.name);
@@ -6788,11 +6810,9 @@ function renderCart() {
     // Saved items
     _renderSavedItems();
 
-    // Coupon discount
-    let couponDisc = 0;
+    // Coupon discount — ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo (duplicate code hata)
+    let couponDisc = getCouponDiscount(subtotal);
     let isFreeShip = activeCoupon && activeCoupon.type === 'free_shipping';
-    if(activeCoupon && activeCoupon.type === 'flat') couponDisc = Math.min(activeCoupon.value, subtotal);
-    else if(activeCoupon && activeCoupon.type === 'percent') couponDisc = Math.round(subtotal * activeCoupon.value / 100);
     if(isFreeShip) courier = 0;
     let finalTotal = subtotal - couponDisc + courier;
     let couponRow = couponDisc > 0 ? `<div style="display:flex;justify-content:space-between;color:#c2185b;font-weight:600;"><span>🎟️ Coupon (${activeCoupon.code}):</span><span>-₹${couponDisc}</span></div>` : (isFreeShip ? `<div style="display:flex;justify-content:space-between;color:#c2185b;font-weight:600;"><span>🎟️ Free Shipping (${activeCoupon.code}):</span><span style="color:green">FREE</span></div>` : '');
@@ -6922,12 +6942,8 @@ async function checkout() {
     if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0; // ✅ FIX: empty cart -Infinity guard
-    // Coupon discount apply karo
-    let couponDiscount = 0;
-    if(activeCoupon) {
-        if(activeCoupon.type === 'flat') couponDiscount = Math.min(activeCoupon.value, subtotal);
-        else if(activeCoupon.type === 'percent') couponDiscount = Math.round(subtotal * activeCoupon.value / 100);
-    }
+    // Coupon discount apply karo — ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
+    let couponDiscount = getCouponDiscount(subtotal);
     let isFreeShipping = activeCoupon && activeCoupon.type === 'free_shipping';
     let courier = (subtotal >= settings.freeMin || isFreeShipping) ? 0 : maxCourier;
     let total = subtotal - couponDiscount + courier;
@@ -6957,14 +6973,16 @@ async function checkout() {
         adminNote: (function(){ let el=document.getElementById('deliveryNoteInput'); return el && el.value.trim() ? '📝 Customer Note: '+el.value.trim() : ''; })()
     };
     orders.unshift(order);
-    // ✅ FIX: try/catch — Supabase failure pe graceful error + localStorage fallback
+    // ✅ FIX: try/catch — Supabase failure pe graceful error (no localStorage fallback)
     try {
         await sbSaveOrder(order);
     } catch(e) {
-        console.error('[checkout] Supabase save failed, localStorage fallback active:', e);
+        console.error('[checkout] Supabase save failed — order in-memory mein hai, sync retry hoga:', e);
         showToast('⚠️ Order saved locally (server sync pending)', '#e67e22');
     }
     /* orders saved via Supabase */
+    // ✅ FIX: Admin notification — new order placed
+    addNotif('📦 New Order #' + String(orderId).slice(-6) + ' from ' + currentUser.name + ' — ₹' + total, 'order');
     // Coupon use count increment
     if(activeCoupon) { try { sbIncrementCoupon(activeCoupon.code); } catch(e){} activeCoupon = null; }
     updateStats();
@@ -6990,15 +7008,11 @@ async function openUPIPayModal() {
     // ✅ FIX 2: Login check — bina login ke UPI modal nahi khulegа
     if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
 
-    // Calculate current cart total
+    // Calculate current cart total — ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length ? Math.max(...cart.map(i => i.courierCharge||0)) : 0;
-    let couponDiscount = 0;
     let isFreeShipping = activeCoupon && activeCoupon.type === 'free_shipping';
-    if(activeCoupon) {
-        if(activeCoupon.type === 'flat') couponDiscount = Math.min(activeCoupon.value, subtotal);
-        else if(activeCoupon.type === 'percent') couponDiscount = Math.round(subtotal * activeCoupon.value / 100);
-    }
+    let couponDiscount = getCouponDiscount(subtotal);
     let courier = (subtotal >= (settings.freeMin||999) || isFreeShipping) ? 0 : maxCourier;
     let total = subtotal - couponDiscount + courier;
     if(total < 0) total = 0;
@@ -7096,12 +7110,9 @@ async function sendPaymentScreenshotWhatsApp() {
         try {
             let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
             let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0;
-            let couponDiscount = 0;
+            // ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
             let isFreeShipping = activeCoupon && activeCoupon.type === 'free_shipping';
-            if(activeCoupon) {
-                if(activeCoupon.type === 'flat') couponDiscount = Math.min(activeCoupon.value, subtotal);
-                else if(activeCoupon.type === 'percent') couponDiscount = Math.round(subtotal * activeCoupon.value / 100);
-            }
+            let couponDiscount = getCouponDiscount(subtotal);
             let courier = (subtotal >= (settings.freeMin||999) || isFreeShipping) ? 0 : maxCourier;
             let orderId = genOrderId();
             let hasWholesale = cart.some(i => i.isB2B);
@@ -7362,7 +7373,7 @@ function submitDealershipForm() {
     if(!name || !phone || !city || !state || !type) {
         showToast('❌ Please fill in all required (*) fields.', '#ff4444'); return;
     }
-    // Save to localStorage
+    // ✅ v40: Supabase mein save (saveDealershipData → sbSaveDealership internally call karta hai)
     let enquiry = {
         id: 'dl_' + Date.now() + '_' + Math.floor(1000 + Math.random() * 9000),
         name, phone, email, city, state, type, investment, message,
@@ -7528,6 +7539,40 @@ function showLoginForm() {
     document.getElementById('changeUserPassSection').style.display = 'none';
     var fp = document.getElementById('forgotPassForm'); if(fp) fp.style.display = 'none';
 }
+// ─────────────────────────────────────────────────────────────
+// 🔒 FIX M-3 (moved here): User Login Brute Force Protection
+// MUST be declared before doForgotPassword + checkUserEmail use it
+// max 5 attempts, 5 min cooldown — sessionStorage scoped (tab-local)
+// ─────────────────────────────────────────────────────────────
+const _userLoginGuard = (function() {
+    const STORE_FAILS = 'ulg_f';
+    const STORE_LOCK  = 'ulg_l';
+    const MAX_FAILS = 5;
+    const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
+    return {
+        isLocked: function() {
+            const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10);
+            return Date.now() < until;
+        },
+        secondsLeft: function() {
+            const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10);
+            return Math.ceil((until - Date.now()) / 1000);
+        },
+        recordFail: function() {
+            let fails = parseInt(sessionStorage.getItem(STORE_FAILS) || '0', 10) + 1;
+            if (fails >= MAX_FAILS) {
+                sessionStorage.setItem(STORE_LOCK, String(Date.now() + LOCKOUT_MS));
+                sessionStorage.setItem(STORE_FAILS, '0');
+            } else {
+                sessionStorage.setItem(STORE_FAILS, String(fails));
+            }
+        },
+        reset: function() {
+            sessionStorage.removeItem(STORE_FAILS);
+            sessionStorage.removeItem(STORE_LOCK);
+        }
+    };
+})();
 function showForgotPassword() {
     document.getElementById('userAuthTabs').style.display = 'none';
     document.getElementById('userLoginForm').style.display = 'none';
@@ -7548,6 +7593,12 @@ function clearAndShowLogin() {
 }
 
 async function doForgotPassword() {
+    // 🔒 FIX M-1: Brute force protection — same guard as login
+    if (_userLoginGuard.isLocked()) {
+        let msg2 = document.getElementById('fpMsg');
+        if(msg2) { msg2.style.color='#c62828'; msg2.style.padding='0.4rem 0.6rem'; msg2.textContent = '⛔ Too many attempts! ' + _userLoginGuard.secondsLeft() + ' sec baad try karein.'; }
+        return;
+    }
     let email = (document.getElementById('fpEmail').value || '').trim().toLowerCase();
     let phone = (document.getElementById('fpPhone').value || '').trim().replace(/\D/g,'');
     let newPass = document.getElementById('fpNewPass').value;
@@ -7598,6 +7649,7 @@ async function doForgotPassword() {
     let enteredLast10 = phone.slice(-10);
     let storedLast10 = storedPhone.slice(-10);
     if(storedLast10 !== enteredLast10) {
+        _userLoginGuard.recordFail(); // 🔒 FIX M-1: Phone mismatch = failed attempt
         setMsg('❌ Phone number does not match! Please enter your registered mobile number.', '#ff4444');
         return;
     }
@@ -7609,7 +7661,7 @@ async function doForgotPassword() {
     // Supabase triggers kabhi kabhi updated_at inject karte hain — upsert se yeh bypass hota hai
     try {
         const { error: updateError } = await db.from('users')
-            .upsert({ email: email, password: hashedNew }, { onConflict: 'email', ignoreDuplicates: false });
+            .upsert({ email: email, password: hashedNew }, { onConflict: 'email' }); // ✅ FIX BUG#3: ignoreDuplicates unsupported — removed
         if(updateError) {
             setMsg('❌ Password update failed: ' + updateError.message, '#ff4444');
             return;
@@ -7619,9 +7671,9 @@ async function doForgotPassword() {
         return;
     }
 
-    // ✅ In-memory users array bhi sync karo (same session mein login ke liye)
-    let memIdx = (users || []).findIndex(u => (u.email||'').toLowerCase() === email);
-    if(memIdx >= 0) { users[memIdx].password = hashedNew; }
+    // 🔒 FIX M-5: in-memory users array mein hashed password NAHI store karo
+    // Supabase already update ho chuka hai — next login fresh Supabase fetch karega
+    // (users[memIdx].password = hashedNew — REMOVED for security)
 
     // ✅ FIX 6: Success — fields clear karo aur login par bhejo
     setMsg('✅ Password successfully reset! You can now login.', '#2c5a4a');
@@ -7646,6 +7698,11 @@ function showSignupForm() {
 }
 function showLoginStep1() { showLoginForm(); }
 async function checkUserEmail() {
+    // 🔒 FIX C1: Brute force check
+    if (_userLoginGuard.isLocked()) {
+        showToast('⛔ Too many failed attempts! ' + _userLoginGuard.secondsLeft() + ' seconds baad try karein.', '#c62828');
+        return;
+    }
     let email = document.getElementById('userEmail').value.trim().toLowerCase();
     let pass = document.getElementById('userLoginPass') ? document.getElementById('userLoginPass').value : '';
     if(!email || !email.includes('@')) { showToast('❌ Valid email dalein!', '#ff4444'); return; }
@@ -7693,7 +7750,7 @@ async function checkUserEmail() {
         // Migrate plaintext → hashed silently
         if (verified && userData.password && !userData.password.startsWith('sha256:')) {
             hashPassword(pass).then(h => {
-                db.from('users').upsert({ email: email, password: h }, { onConflict: 'email', ignoreDuplicates: false }).catch(() => {});
+                db.from('users').upsert({ email: email, password: h }, { onConflict: 'email' }).catch(() => {}); // ✅ FIX BUG#3: ignoreDuplicates unsupported — removed
             });
         }
     } catch(e) {
@@ -7701,7 +7758,7 @@ async function checkUserEmail() {
         return;
     }
 
-    if(!verified) { showToast('❌ Incorrect password!', '#ff4444'); return; }
+    if(!verified) { _userLoginGuard.recordFail(); showToast('❌ Incorrect password!', '#ff4444'); return; }
 
     // Block check
     if(userData.blocked === true) {
@@ -7710,6 +7767,7 @@ async function checkUserEmail() {
     }
 
     // Safe user object — password exclude
+    _userLoginGuard.reset(); // 🔒 FIX C1: Reset failed attempts on success
     let user = {
         name: userData.name,
         email: userData.email,
@@ -7837,7 +7895,7 @@ function saveUserPassword() {
             hashPassword(newPass).then(async hashedNew => {
                 try {
                     const { error: upErr } = await db.from('users')
-                        .upsert({ email: currentUser.email, password: hashedNew }, { onConflict: 'email', ignoreDuplicates: false });
+                        .upsert({ email: currentUser.email, password: hashedNew }, { onConflict: 'email' }); // ✅ FIX BUG#3: ignoreDuplicates unsupported — removed
                     if(upErr) { showUserPassMsg('❌ Password update failed: ' + upErr.message, '#ff4444'); return; }
                     // memory/localStorage mein password NAHI rakhna
                     showUserPassMsg('✅ Password successfully changed!', '#2c5a4a');
@@ -7900,9 +7958,9 @@ function loadDashboard() {
     // ✅ FIX: Supabase cart sync ke baad bhi re-render karo (100ms delay)
     setTimeout(_renderUserCartSection, 800);
     let userOrders = orders.filter(o =>
+        // 🔒 FIX M-2: Name match hataya — non-unique hai (privacy leak). Email + phone only.
         (o.userId && o.userId === currentUser.email) ||
-        (o.customerPhone && currentUser.phone && o.customerPhone === currentUser.phone) ||
-        (o.customerName && currentUser.name && o.customerName === currentUser.name)
+        (o.customerPhone && currentUser.phone && o.customerPhone === currentUser.phone)
     );
     let totalSpent = userOrders.filter(o=>o.status!=='Cancelled').reduce((s,o)=>{ let t=typeof o.total==='number'?o.total:parseInt(String(o.total).replace(/[₹,]/g,''))||0; return s+t; },0);
     let delivered = userOrders.filter(o=>o.status==='Delivered').length;
@@ -8051,9 +8109,9 @@ async function loadUserBills() {
     // ✅ FIX: Bills sirf localStorage se nahi — directly user ke orders se bhi dikhao
     // Admin ke localStorage mein bill hoga, user ke paas nahi — isliye orders se match karo
     let userOrders = orders.filter(o => {
+        // 🔒 FIX M-2: Name match hataya — non-unique hai (privacy leak). Email + phone only.
         return (o.userId && o.userId === currentUser.email) ||
-               (o.customerPhone && o.customerPhone === currentUser.phone) ||
-               (o.customerName && o.customerName === currentUser.name);
+               (o.customerPhone && o.customerPhone === currentUser.phone);
     });
 
     // In-memory bills array use karo (bl stale localStorage ref tha — removed)
@@ -8072,8 +8130,8 @@ async function loadUserBills() {
         let o = orders.find(ord => ord.id === b.orderId || ord.id == b.orderId);
         if(!o) return;
         let isMyOrder = (o.userId === currentUser.email) ||
-                        (o.customerPhone === currentUser.phone) ||
-                        (o.customerName === currentUser.name);
+                        // 🔒 FIX M-2: Name match hataya — non-unique (privacy leak)
+                        (o.customerPhone === currentUser.phone);
         if(!isMyOrder) return;
         if(shown.has(o.id)) return;
         shown.add(o.id);
@@ -8112,13 +8170,13 @@ async function loadUserBills() {
     }
     el.innerHTML = html;
 }
-// 🔒 FIX #7: saveCurrentUser — password/sensitive fields strip karo before localStorage
+// 🔒 FIX #7: saveCurrentUser — password/sensitive fields strip karke sessionStorage mein save karo
 function saveCurrentUser() {
     if(currentUser) {
         const { password, _newPassword, ...safeUser } = currentUser;
-        /* currentUser in-memory only */
+        try { sessionStorage.setItem('nexdrop_current_user', JSON.stringify(safeUser)); } catch(e) {}
     } else {
-        /* currentUser cleared in-memory */
+        try { sessionStorage.removeItem('nexdrop_current_user'); } catch(e) {}
     }
 }
 
@@ -8155,7 +8213,7 @@ async function adminResetPassword() {
     if(newP.length < 8) { setMsg('❌ Password min 8 characters ka hona chahiye', '#c62828'); return; }
     setMsg('⏳ Verifying...', '#888');
     try {
-        const { data: adminCred, error } = await db.from('settings').select('value').eq('key','admin_credentials').single();
+        const { data: adminCred, error } = await db.from('settings').select('value').eq('key','admin_credentials').maybeSingle(); // ✅ FIX: .single()→.maybeSingle() (row missing pe crash prevent)
         if(error || !adminCred) { setMsg('❌ Server se connect nahi hua', '#c62828'); return; }
         let creds = typeof adminCred.value === 'string' ? JSON.parse(adminCred.value) : adminCred.value;
         if(u !== creds.username) { setMsg('❌ Username galat hai', '#c62828'); return; }
@@ -8177,13 +8235,14 @@ async function adminResetPassword() {
         setMsg('❌ Error: ' + (e.message || 'Try again'), '#c62828');
     }
 }
-// 🔒 Brute force protection — max 5 attempts, 30s cooldown
+// 🔒 Brute force protection — max 5 attempts, 5 min cooldown
 const _adminLoginGuard = (function() {
-    // 🔒 FIX: sessionStorage mein persist karo taaki page refresh se lockout reset na ho
+    // ✅ v40: localStorage → sessionStorage — brute-force state session-scoped hona chahiye
+    // localStorage persistent hai across tabs/restarts — security risk. sessionStorage tab-local hai.
     const STORE_FAILS = 'adlg_f';
     const STORE_LOCK  = 'adlg_l';
     const MAX_FAILS = 5;
-    const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes (30s se badhakar)
+    const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
     return {
         isLocked: function() {
             const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10);
@@ -8266,7 +8325,7 @@ async function adminLogin() {
         // 🔒 Sirf session token save karo — username/password nahi
         _adminVault.setSession();
         delete settings.adminPassword;
-        settings.adminUsername = u;
+        delete settings.adminUsername; // 🔒 FIX M-4: Admin identity global state mein nahi — vault se manage hoga
         closeAdminLogin();
         openAdminPanel();
     } else {
@@ -8982,6 +9041,8 @@ function updateStatus(id, status) {
                     prod.stockQty = Math.max(0, prod.stockQty - item.quantity);
                     if(prod.stockQty === 0) { prod.inStock = false; outOfStock.push(prod.name); }
                     deducted.push(item.name + ' −' + item.quantity);
+                    // ✅ BUG#2 FIX v39.4: Delivered path mein ledger log missing tha — ab add kiya
+                    if(typeof _logStockDeduction === 'function') _logStockDeduction(item.name, !!item.isWholesale, item.quantity, prod.stockQty, o.id);
                 }
             }
             o.stockDeducted = true;
@@ -9033,6 +9094,11 @@ function updateStatus(id, status) {
         showToast(restoreMsg, '#ff9800');
     }
     updateStats(); // FIX v36.19.5: saveOrders() bulk write remove — sbSaveOrder handles targeted upsert
+    // ✅ FIX: Admin notification for key status changes
+    if(['Shipped','Delivered','Cancelled'].includes(status) && prevStatus !== status) {
+        let notifIcons = { Shipped:'🚚', Delivered:'✅', Cancelled:'❌' };
+        addNotif(notifIcons[status] + ' Order #' + String(id).slice(-6) + ' marked as ' + status, 'order');
+    }
     // ✅ FIX v36.7: await sbSaveOrder taaki Supabase save pehle complete ho, phir UI refresh ho
     // Warna auto-refresh 30s mein purana status overwrite kar deta tha
     (async function() {
@@ -9053,8 +9119,10 @@ async function updatePaymentStatus(orderId, newPayStatus) {
 }
 
 // ✅ FIX: confirm() hata diya — 2-step toast pattern (mobile safe)
+// ✅ BUG#1 FIX v39.4: key variable missing tha — window[undefined] se sab orders ek hi state share karte the
 function deleteOrder(id) {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
+    var key = '_deleteOrderPending_' + id; // ← FIX: har order ka alag key
     if(window[key]) {
         window[key] = false;
         sbDeleteOrder(id);
@@ -9157,7 +9225,7 @@ function startAutoRefresh() {
                 let arr = typeof b2Data.value === 'string' ? JSON.parse(b2Data.value) : b2Data.value;
                 if (Array.isArray(arr) && arr.length > 0) { b2bProducts = arr; }
             }
-        } catch(e) { /* localStorage already up-to-date from last save */ }
+        } catch(e) { /* in-memory already up-to-date from last Supabase sync */ }
         updateStats();
         refreshStockDashboard();
         // Admin panel open hai to orders bhi refresh karo
@@ -9195,8 +9263,10 @@ function loadAdminUsers() {
     let searchQ = (document.getElementById('userSearchBox')?.value||'').toLowerCase().trim();
     let dateFrom = document.getElementById('userDateFrom')?.value||'';
     let dateTo = document.getElementById('userDateTo')?.value||'';
+    // ✅ FIX: _stripPasswords() use karo — password fields admin UI mein expose na ho
+    let safeUsers = _stripPasswords(users);
 
-    let filtered = users.filter(u => {
+    let filtered = safeUsers.filter(u => {
         if(searchQ) {
             let hay = ((u.name||'')+' '+(u.phone||'')+' '+(u.email||'')).toLowerCase();
             if(!hay.includes(searchQ)) return false;
@@ -9250,12 +9320,20 @@ function clearUserFilter() {
 }
 function adminDeleteUser(email) {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
-    if(!confirm('⚠️ User delete karna chahte ho?\n'+email+'\n\nYe action undo nahi hogi!')) return;
+    // ✅ FIX v39.5: confirm() → 2-step toast (mobile PWA safe) + N+1 fix (saveUsers() enough)
+    let _delKey = '_delUser_' + email;
+    if(window[_delKey]) {
+        window[_delKey] = false;
+    } else {
+        window[_delKey] = true;
+        showToast('⚠️ User "' + email + '" delete? Dobara click karein confirm ke liye.', '#ff9800');
+        setTimeout(function(){ window[_delKey] = false; }, 4000);
+        return;
+    }
     let idx = users.findIndex(u => u.email === email);
     if(idx === -1){showToast('❌ User nahi mila!','#c62828');return;}
     users.splice(idx, 1);
-    saveUsers();
-    sbSaveUser && users.forEach(u => sbSaveUser(u));
+    saveUsers(); // ✅ FIX v39.5: N+1 removed — saveUsers() already Supabase sync karta hai
     // Supabase se bhi delete karo
     (async()=>{
         try {
@@ -9396,8 +9474,7 @@ function loadSettingsForm() {
             qrPrev.innerHTML = '<div style="font-size:0.7rem;color:#999;margin-top:3px;">No QR code uploaded.</div>';
         }
     }
-    // Load unit management
-    loadUnitsDisplay();
+    // ✅ FIX Bug C: loadUnitsDisplay yahan se remove — patch (line ~13900) already loadSettingsForm override mein call karta hai (double call prevent)
     // ✅ FIX Bug1: Naye categories Settings tab mein dikhenge
     if(typeof loadCategoryTagsList === 'function') loadCategoryTagsList();
 }
@@ -9551,7 +9628,7 @@ async function changePassword() {
 
     // 🔒 FIX #1: Old password ko Supabase se verify karo — memory mein password nahi
     try {
-        const { data: credData, error } = await db.from('settings').select('value').eq('key', 'admin_credentials').single();
+        const { data: credData, error } = await db.from('settings').select('value').eq('key', 'admin_credentials').maybeSingle(); // ✅ FIX: .single()→.maybeSingle() (row missing pe error prevent)
         if (error || !credData) { showPassMsg('❌ Verification failed. Try again.', '#ff4444'); return; }
         let creds = typeof credData.value === 'string' ? JSON.parse(credData.value) : credData.value;
         const oldOk = await verifyPassword(old, creds.password || '');
@@ -9598,6 +9675,10 @@ async function clearAllTestData() {
     // 1. In-memory reset
     orders = []; users = []; bulkEnquiries = []; currentUser = null;
     bills = []; bulkEnquiries = []; dealershipEnquiries = [];
+    // ✅ v40.1 FIX: _wiBills, _pbBills, _khataCustomers, _khataEntries bhi reset karo (Supabase delete ke baad stale data prevent)
+    _wiBills = []; _pbBills = [];
+    _khataCustomers = []; _khataEntries = {};
+    savedItems = [];
     // 🔒 FIX Bug1: _coupons, _reviews, _adminNotifs bhi in-memory reset karo (Supabase delete kaafi nahi)
     if(typeof _coupons !== 'undefined') _coupons = [];
     if(typeof _reviews !== 'undefined') _reviews = [];
@@ -9652,15 +9733,7 @@ async function clearAllTestData() {
     saveProducts();
     saveB2B();
 
-    // 6. localStorage bhi clear karo (cache)
-    const lsKeys = [
-        'nexdrop_orders','nexdrop_users','nexdrop_bulk','nexdrop_user',
-        'nexdrop_bills','nexdrop_dealership','nexdrop_bill_counter',
-        'nexdrop_wi_counter','nexdrop_pb_counter','nexdrop_wi_bills',
-        'nexdrop_pb_bills','nexdrop_reviews','nexdrop_admin_notifs',
-        'nexdrop_khata_customers',
-    ];
-    lsKeys.forEach(k => _origLSRemove(k));
+    // ✅ v40.1: _origLSRemove calls removed — no-op functions hain (localStorage disabled hai)
 
     // 7. UI refresh
     loadAdminOrders();
@@ -9670,6 +9743,11 @@ async function clearAllTestData() {
     loadAdminB2B();
     updateStats();
     refreshStockDashboard();
+    // ✅ v40.1 FIX: WI/PB bills aur khata UI bhi refresh karo (in-memory reset ke baad)
+    if(typeof renderWIBillList === 'function') renderWIBillList();
+    if(typeof renderPBBillList === 'function') renderPBBillList();
+    if(typeof khataLoadDropdown === 'function') khataLoadDropdown();
+    if(typeof khataClearSummary === 'function') khataClearSummary();
     // 🔒 FIX Bug7: Coupons aur reviews tabs bhi refresh karo
     if(typeof loadCouponsList === 'function') loadCouponsList();
     if(typeof loadAdminReviews === 'function') loadAdminReviews();
@@ -9924,7 +10002,8 @@ async function sellerRegister() {
         if (existing) { showToast('⚠️ Is email se pehle se account hai. Login karo.', '#e67e22'); return; }
     } catch(e) {}
 
-    const hash = await sellerHash(pass);
+    // 🔒 FIX C3: Use hashPassword (salted SHA-256) instead of sellerHash (unsalted)
+    const hash = await hashPassword(pass);
     const row = {
         shop_name: shop, owner_name: owner, phone, email,
         city, gstin,
@@ -9967,8 +10046,9 @@ async function sellerLogin() {
     if (!seller.password_hash) {
         showToast('❌ Account mein password set nahi hai. Admin se contact karein.', '#c62828'); return;
     }
-    const hash = await sellerHash(pass);
-    if (seller.password_hash !== hash) {
+    // 🔒 FIX C3: Use verifyPassword (salted SHA-256 + backward compat) instead of sellerHash (unsalted)
+    const verified = await verifyPassword(pass, seller.password_hash).catch(() => false);
+    if (!verified) {
         _sellerLoginGuard.recordFail();
         showToast('❌ Incorrect password.', '#c62828');
         document.getElementById('sellerLoginPass').value = '';
@@ -10407,9 +10487,30 @@ function adjustStockV2(prefix, id, delta) {
     let newQty = Math.max(0, (parseInt(el.value) || 0) + delta);
     el.value = newQty;
     el.style.borderColor = newQty === 0 ? '#ff4444' : newQty <= 10 ? '#ff9800' : '#4caf50';
+    // 🔒 FIX: Unsaved changes banner dikhao
+    _showStockUnsavedBanner();
     // Live update dashboard totals
     updateCategoryTotalsLive();
     if(typeof refreshStockDashboard==='function') refreshStockDashboard();
+}
+
+// 🔒 FIX: Stock unsaved changes banner helper
+function _showStockUnsavedBanner() {
+    let banner = document.getElementById('_stockUnsavedBanner');
+    if(!banner) {
+        let stockTab = document.getElementById('tab-stock');
+        if(!stockTab) return;
+        banner = document.createElement('div');
+        banner.id = '_stockUnsavedBanner';
+        banner.style.cssText = 'position:sticky;top:0;z-index:99;background:#ff9800;color:white;text-align:center;padding:0.4rem 1rem;font-size:0.78rem;font-weight:700;border-radius:0 0 8px 8px;';
+        banner.innerHTML = '⚠️ Unsaved changes hain! Neeche "💾 Save All Stock" click karein.';
+        stockTab.insertBefore(banner, stockTab.firstChild);
+    }
+    banner.style.display = 'block';
+}
+function _hideStockUnsavedBanner() {
+    let banner = document.getElementById('_stockUnsavedBanner');
+    if(banner) banner.style.display = 'none';
 }
 
 function liveStockColor(prefix, id) {
@@ -10417,6 +10518,7 @@ function liveStockColor(prefix, id) {
     if(!el) return;
     let qty = parseInt(el.value) || 0;
     el.style.borderColor = qty === 0 ? '#ff4444' : qty <= 10 ? '#ff9800' : '#4caf50';
+    _showStockUnsavedBanner(); // 🔒 FIX: manual input change pe bhi banner dikhao
     updateCategoryTotalsLive();
 }
 
@@ -10612,6 +10714,7 @@ function saveAllStock() {
     });
     saveProducts(); saveB2B(); displayProducts(); displayB2B();
     refreshStockDashboard(); loadStockManager();
+    _hideStockUnsavedBanner(); // 🔒 FIX: Banner hide after save
     showToast('✅ All stock saved successfully!', '#2c5a4a');
 }
 
@@ -10830,7 +10933,7 @@ async function openStockLedger() {
         <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem;flex-wrap:wrap;">
             <input type="text" id="_ledgerSearch" placeholder="🔍 Product ya source search..." oninput="document.getElementById('_ledgerTbody').innerHTML=renderLedgerRows(this.value)"
                 style="flex:1;padding:0.4rem 0.7rem;border:1.5px solid #ddd;border-radius:8px;font-size:0.78rem;min-width:180px;">
-            <button onclick="if(confirm('Poora ledger clear karein?')){clearStockLedger();document.getElementById('_stockLedgerModal').remove();}" style="background:#ff4444;color:white;border:none;padding:0.4rem 0.9rem;border-radius:8px;font-size:0.72rem;cursor:pointer;font-weight:600;">🗑️ Clear</button>
+            <button onclick="clearStockLedger_confirm()" style="background:#ff4444;color:white;border:none;padding:0.4rem 0.9rem;border-radius:8px;font-size:0.72rem;cursor:pointer;font-weight:600;">🗑️ Clear</button>
         </div>
         <div style="font-size:0.7rem;color:#888;margin-bottom:0.5rem;">${entries.length} total entries (max 500 stored)</div>
         <div style="overflow-x:auto;max-height:60vh;overflow-y:auto;">
@@ -10860,6 +10963,20 @@ function clearStockLedger() {
         if(r.error) console.warn('stock_ledger Supabase clear error:', r.error.message);
     });
     showToast('🗑️ Stock ledger cleared!', '#ff9800');
+}
+// ✅ FIX v39.5: confirm() → 2-step toast (mobile PWA safe)
+function clearStockLedger_confirm() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
+    if(!window._clearLedgerConfirm) {
+        window._clearLedgerConfirm = true;
+        showToast('⚠️ Poora ledger clear? Dobara click karein confirm ke liye.', '#ff9800');
+        setTimeout(function(){ window._clearLedgerConfirm = false; }, 4000);
+        return;
+    }
+    window._clearLedgerConfirm = false;
+    clearStockLedger();
+    var m = document.getElementById('_stockLedgerModal');
+    if(m) m.remove();
 }
 
 // ── (5) STOCK VALUATION MODAL ─────────────────────────────────
@@ -11302,15 +11419,18 @@ function openBillModal(orderId, autoSend) {
     if(posEl) posEl.innerText = buyerStateName + ' (' + buyerStateCode + ')' + (isInterState ? ' — Inter-State' : ' — Intra-State');
 
     // ── Items Table (per column, IGST/CGST label) ──
+    // ✅ FIX BUG#4: GST per item se compute karo taaki footer total = sum of item rows (rounding consistency)
     let itemRows = '';
+    let computedGstTotal = 0; // live recomputed from item rows — replaces bill.gst for display
     bill.items.forEach((item, i) => {
         let amt = item.price * item.quantity;
         let prod = products.find(p => p.name === item.name || p.id === item.productId);
         let hsnCode = (prod && prod.hsnCode) ? prod.hsnCode : '1108';
-        let gstSlab = (prod && prod.gstSlab != null) ? prod.gstSlab : 5;
+        let gstSlab = (item.gstSlab != null) ? item.gstSlab : ((prod && prod.gstSlab != null) ? prod.gstSlab : 5); // ✅ snapshot first
         let priceUnit = (prod && prod.priceUnit) ? prod.priceUnit : 'pcs';
         let taxableAmt = Math.round(amt / (1 + gstSlab/100) * 100) / 100;
         let gstAmt = Math.round((amt - taxableAmt) * 100) / 100;
+        computedGstTotal += gstAmt; // accumulate for consistent footer
         let subDesc = item.name + ' - ' + item.quantity + ' ' + priceUnit;
         let gstLabel = isInterState ? ('Output IGST @ ' + gstSlab + '%') : ('CGST @ ' + (gstSlab/2) + '% + SGST @ ' + (gstSlab/2) + '%');
         itemRows += '<tr style="background:' + (i%2===0 ? '#faf8f5' : 'white') + ';">' +
@@ -11323,31 +11443,47 @@ function openBillModal(orderId, autoSend) {
             '<td style="padding:0.4rem 0.45rem;text-align:right;font-weight:700;vertical-align:top;">₹' + amt + '</td></tr>' +
             '<tr style="background:' + (i%2===0 ? '#faf8f5' : 'white') + ';"><td colspan="6" style="padding:0.18rem 0.45rem;text-align:right;font-size:0.6rem;color:#7b1fa2;">' + gstLabel + '</td><td style="padding:0.18rem 0.45rem;text-align:right;font-size:0.6rem;color:#7b1fa2;">₹' + gstAmt.toFixed(2) + '</td></tr>';
     });
+    computedGstTotal = Math.round(computedGstTotal * 100) / 100; // final rounding
     document.getElementById('bill_itemsBody').innerHTML = itemRows;
     document.getElementById('bill_subtotal').innerText = '₹' + bill.subtotal;
     document.getElementById('bill_courier').innerText = bill.courier === 0 ? 'FREE' : '₹' + bill.courier;
-    document.getElementById('bill_gst').innerText = '₹' + bill.gst.toFixed(2);
+    // ✅ FIX BUG#4: computedGstTotal use karo (item-row sum se consistent)
+    document.getElementById('bill_gst').innerText = '₹' + computedGstTotal.toFixed(2);
     document.getElementById('bill_total').innerText = '₹' + bill.total;
     document.getElementById('bill_amtWords').innerText = 'Indian Rupees ' + numberToWords(bill.total) + ' Only';
 
-    // ── GST row label (IGST / CGST+SGST) ──
+    // ── GST row label (IGST / CGST+SGST) — BUG#5 FIX: Aggregate rate across all items ──
+    // ✅ FIX BUG#5: items[0] ka slab use karne ki jagah weighted avg / "Mixed" show karo
     let gstLabelEl = document.getElementById('bill_gstLabel');
     if(gstLabelEl) {
-        let gstSlab0 = 5;
-        try { let p0 = products.find(p => p.name === bill.items[0]?.name); gstSlab0 = (p0 && p0.gstSlab) ? p0.gstSlab : 5; } catch(e) {}
-        gstLabelEl.innerText = isInterState ? ('Output IGST @ ' + gstSlab0 + '% — Total') : ('CGST @ ' + (gstSlab0/2) + '% + SGST @ ' + (gstSlab0/2) + '% — Total');
+        let slabs = [...new Set(bill.items.map(item => {
+            let p0 = products.find(p => p.name === item.name || p.id === item.productId);
+            return (item.gstSlab != null) ? item.gstSlab : ((p0 && p0.gstSlab != null) ? p0.gstSlab : 5);
+        }))];
+        let slabLabel = slabs.length === 1 ? slabs[0] + '%' : 'Mixed (' + slabs.join('%,') + '%)';
+        gstLabelEl.innerText = isInterState
+            ? ('Output IGST @ ' + slabLabel + ' — Total')
+            : ('CGST + SGST @ ' + slabLabel + ' — Total');
     }
     let gstRateEl = document.getElementById('bill_gstRate');
-    if(gstRateEl) { let gs=5; try{let p0=products.find(p=>p.name===bill.items[0]?.name); gs=(p0&&p0.gstSlab)?p0.gstSlab:5;}catch(e){} gstRateEl.innerText = gs + ' %'; }
-    if(document.getElementById('bill_cgst')) document.getElementById('bill_cgst').innerText = '₹' + (bill.gst/2).toFixed(2);
-    if(document.getElementById('bill_sgst')) document.getElementById('bill_sgst').innerText = '₹' + (bill.gst/2).toFixed(2);
+    if(gstRateEl) {
+        let slabs2 = [...new Set(bill.items.map(item => {
+            let p0 = products.find(p => p.name === item.name || p.id === item.productId);
+            return (item.gstSlab != null) ? item.gstSlab : ((p0 && p0.gstSlab != null) ? p0.gstSlab : 5);
+        }))];
+        gstRateEl.innerText = slabs2.length === 1 ? slabs2[0] + ' %' : 'Mixed';
+    }
+    // ✅ FIX BUG#4: computedGstTotal se CGST/SGST split karo (not stale bill.gst)
+    if(document.getElementById('bill_cgst')) document.getElementById('bill_cgst').innerText = '₹' + (computedGstTotal/2).toFixed(2);
+    if(document.getElementById('bill_sgst')) document.getElementById('bill_sgst').innerText = '₹' + (computedGstTotal/2).toFixed(2);
 
     // ── HSN/SAC GST Breakdown (IGST or CGST+SGST) ──
     let hsnMap = {};
     bill.items.forEach(item => {
         let prod = products.find(p => p.name === item.name || p.id === item.productId);
         let hsn = (prod && prod.hsnCode) ? prod.hsnCode : '1108';
-        let gstSlab = (prod && prod.gstSlab != null) ? prod.gstSlab : 5;
+        // ✅ FIX BUG#4: item.gstSlab snapshot pehle check karo (deleted products ka slab lost na ho)
+        let gstSlab = (item.gstSlab != null) ? item.gstSlab : ((prod && prod.gstSlab != null) ? prod.gstSlab : 5);
         let amt = item.price * item.quantity;
         let taxable = Math.round(amt / (1 + gstSlab/100) * 100) / 100;
         let gstAmt = Math.round((amt - taxable) * 100) / 100;
@@ -11850,11 +11986,14 @@ function jumpToProduct(type, id) {
             if(el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.focus(); el.style.outline='3px solid #c49a6c'; setTimeout(()=>el.style.outline='',2000); }
         }, 200);
     } else {
-        switchTab('products');
+        // ✅ FIX: filterAdminByCat() use karo — category filter set hoga, product visible hoga
+        let p = products.find(x => x.id === id);
+        if(p && p.category) filterAdminByCat(p.category);
+        else switchTab('products');
         setTimeout(() => {
             let el = document.getElementById('stockqty_' + id);
             if(el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.focus(); el.style.outline='3px solid #2c5a4a'; setTimeout(()=>el.style.outline='',2000); }
-        }, 200);
+        }, 300);
     }
 }
 
@@ -11865,7 +12004,7 @@ function toggleDarkMode() {
     document.body.classList.toggle('dark-mode');
     let isDark = document.body.classList.contains('dark-mode');
     window._darkMode = isDark; // in-memory only
-    document.querySelector('.dark-toggle').textContent = isDark ? '☀️' : '🌙';
+    let _dt = document.querySelector('.dark-toggle'); if(_dt) _dt.textContent = isDark ? '☀️' : '🌙';
 }
 (function initDarkMode() {
     // Dark mode persisted via Supabase user prefs only
@@ -11883,7 +12022,7 @@ function searchHomeProducts(query) {
     let grid = document.getElementById('homeProductGrid');
     if(!grid) return;
     if(!filtered.length) {
-        grid.innerHTML = '<div style="text-align:center;color:#999;padding:2rem;font-size:0.9rem;grid-column:1/-1;">❌ No products found for "<b>' + q + '</b>"</div>';
+        grid.innerHTML = '<div style="text-align:center;color:#999;padding:2rem;font-size:0.9rem;grid-column:1/-1;">❌ No products found for "<b>' + esc(q) + '</b>"</div>'; // 🔒 FIX: XSS — esc(q) added
         return;
     }
     grid.innerHTML = filtered.map(p => buildProductCard(p)).join('');
@@ -11916,29 +12055,49 @@ function buildOrderTimeline(status) {
 }
 
 // ---- 4. PWA SERVICE WORKER ----
-if('serviceWorker' in navigator) {
+// 🔒 FIX M5: Blob URL SW registration browser me unreliable tha.
+// Ab inline Blob ka fallback ke saath proper pattern use karo.
+if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
-        let swContent = `
-const CACHE = 'nexdrop-v1';
-const ASSETS = ['/'];
-self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))));
-self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).catch(() => caches.match('/')))));
-        `.trim();
-        let blob = new Blob([swContent], {type:'application/javascript'});
-        let swUrl = URL.createObjectURL(blob);
-        navigator.serviceWorker.register(swUrl).catch(()=>{});
+        // Try to register /sw.js if it exists (production deployment)
+        navigator.serviceWorker.register('/sw.js').catch(function() {
+            // Fallback: minimal blob-based SW for local/dev usage
+            try {
+                var swContent = [
+                    'const CACHE="nexdrop-v1";',
+                    'const ASSETS=["/"];',
+                    'self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS))));',
+                    'self.addEventListener("fetch",e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).catch(()=>caches.match("/")))));'
+                ].join('\n');
+                var blob = new Blob([swContent], { type: 'application/javascript' });
+                var swUrl = URL.createObjectURL(blob);
+                navigator.serviceWorker.register(swUrl).then(function() {
+                    // Blob URL SW registered (dev/local mode)
+                }).catch(function() {
+                    // SW not available — app works without it
+                });
+            } catch(e2) {
+                // Ignore SW errors silently
+            }
+        });
     });
 }
 
 // ---- 5. PRINT BILL IMPROVEMENTS (GST breakdown in print) ----
 // printBill defined above (with company settings support)
 
-// ---- 6. localStorage ERROR HANDLING (quota safe save) ----
+// ---- 6. SAFE SAVE (Supabase-backed persistent save utility) ----
 function safeSave(key, data) {
     // ✅ NO-LOCALSTORAGE: Supabase-only persistence
     try {
         db.from('settings').upsert({ key: key, value: JSON.stringify(data) }, { onConflict: 'key' })
-          .then(r => { if(r && r.error) console.log('[safeSave] Supabase err:', key, r.error.message); });
+          .then(r => {
+              if(r && r.error) {
+                  // 🔒 FIX M1: Silent failure hata diya — critical data save fail surface karo
+                  console.error('[safeSave] Supabase err:', key, r.error.message);
+                  showToast('⚠️ Data sync fail: ' + key + ' — Internet check karein.', '#ff9800');
+              }
+          });
         return true;
     } catch(e) {
         showToast('❌ Data could not be saved: ' + e.message, '#ff4444');
@@ -11978,7 +12137,14 @@ function exportOrdersOnly() {
     showToast('✅ Orders JSON is exporting!', '#ff9800');
 }
 function exportUsersOnly() {
-    let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'users', data: { users } };
+    // 🔒 FIX H3: Password hashes ko export se strip karo
+    let safeUsers = users.map(function(u) {
+        var obj = Object.assign({}, u);
+        delete obj.password;
+        delete obj._newPassword;
+        return obj;
+    });
+    let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'users', data: { users: safeUsers } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
     let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = 'nexdrop_users_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json'; a.click();
@@ -12034,7 +12200,8 @@ function importMergeData() {
         if(d.b2bProducts && Array.isArray(d.b2bProducts)) { d.b2bProducts.forEach(np => { if(!b2bProducts.find(p => p.id === np.id)) b2bProducts.push(np); }); saveB2B(); }
         if(d.orders && Array.isArray(d.orders)) { d.orders.forEach(no => { if(!orders.find(o => o.id === no.id)) orders.push(no); }); saveOrders(); }
         if(d.users && Array.isArray(d.users)) { d.users.forEach(nu => { if(!users.find(u => u.email === nu.email)) users.push(nu); }); saveUsers(); }
-        if(d.bills && Array.isArray(d.bills)) { d.bills.forEach(nb => { if(!bills.find(b => b.orderId === nb.orderId)) bills.push(nb); }); safeSave('nexdrop_bills', bills); }
+        // ✅ v40.1 FIX: safeSave('nexdrop_bills') → sbSaveBill per bill (bills TABLE mein save hoga, settings mein nahi)
+        if(d.bills && Array.isArray(d.bills)) { d.bills.forEach(nb => { if(!bills.find(b => b.orderId === nb.orderId)) { bills.push(nb); sbSaveBill(nb); } }); }
         if(d.bulkEnquiries && Array.isArray(d.bulkEnquiries)) { d.bulkEnquiries.forEach(ne => { if(!bulkEnquiries.find(e => e.id === ne.id)) bulkEnquiries.push(ne); }); saveBulk(); }
         updateStats(); loadAdminOrders(); loadAdminUsers();
         if(msgEl) { msgEl.style.display='block'; msgEl.style.background='#e8f5e9'; msgEl.style.color='#2c5a4a'; msgEl.innerHTML='✅ Data merge ho gaya! Duplicates skip kiye.'; }
@@ -12061,7 +12228,8 @@ function importReplaceData() {
         if(d.b2bProducts) { b2bProducts = d.b2bProducts; saveB2B(); }
         if(d.orders) { orders = d.orders; saveOrders(); }
         if(d.users) { users = d.users; saveUsers(); }
-        if(d.bills) { bills = d.bills; safeSave('nexdrop_bills', bills); }
+        // ✅ v40.1 FIX: safeSave('nexdrop_bills') → sbSaveBill per bill (bills TABLE mein save hoga, settings mein nahi)
+        if(d.bills) { bills = d.bills; bills.forEach(b => sbSaveBill(b)); }
         if(d.bulkEnquiries) { bulkEnquiries = d.bulkEnquiries; saveBulk(); }
         if(d.settings) { settings = {...settings, ...d.settings}; saveSettingsData(); loadSettingsForm(); }
         updateStats(); loadAdminOrders(); loadAdminUsers(); loadAdminProducts(); displayProducts();
@@ -12079,7 +12247,7 @@ function importReplaceData() {
 
 // ---- PAGE INIT: Load data and display home products on page load ----
 document.addEventListener('DOMContentLoaded', function() {
-    loadCart(); // ✅ FIX: Cart localStorage se load karo (clear nahi karo)
+    loadCart(); // ✅ v40: Cart in-memory reset karo (logged-in user ka cart sbLoadUserCart() se aayega after login)
     updateCartCount();
     // ✅ FIX: Reorder levels Supabase se pre-load karo (cache warm up)
     _getReorderLevels().catch(function() {});
@@ -12087,17 +12255,13 @@ document.addEventListener('DOMContentLoaded', function() {
     if(typeof displayHomeProducts === 'function') displayHomeProducts();
     // Load full data from Supabase — displayHomeProducts() is also called inside initSupabase()
     loadData();
-    // Safety fallback: re-render after 2s and 5s in case Supabase takes time
+    // Safety fallback: re-render after 2s in case Supabase takes time
+    // ✅ FIX v39.5: 5s duplicate timeout removed — 2s kaafi hai
     setTimeout(function() {
         if(typeof displayProducts === 'function') displayProducts();
         if(typeof displayB2B === 'function') displayB2B();
         if(typeof displayHomeProducts === 'function') displayHomeProducts();
     }, 2000);
-    setTimeout(function() {
-        if(typeof displayProducts === 'function') displayProducts();
-        if(typeof displayB2B === 'function') displayB2B();
-        if(typeof displayHomeProducts === 'function') displayHomeProducts();
-    }, 5000);
 });
 
 // ---- 9. IMAGE LAZY LOADING (IntersectionObserver — NO localStorage) ----
@@ -12561,7 +12725,7 @@ async function pbLoadSuppliersFromSupabase() {
             _suppliers = arr; /* Supabase sync done via pbSaveSuppliers */
         }
     } catch(e) {
-        console.log('Suppliers Supabase load failed, localStorage use hoga:', e.message);
+        console.log('Suppliers Supabase load failed, in-memory default use hoga:', e.message);
     }
 }
 
@@ -12626,6 +12790,12 @@ function deleteSupplier(id) {
 }
 
 function pbLoadSuppliers() {
+    // ✅ FIX: Supabase se fresh suppliers load karo (silent background sync)
+    pbLoadSuppliersFromSupabase().then(function() {
+        _pbRenderSuppliers();
+    }).catch(function() { _pbRenderSuppliers(); });
+}
+function _pbRenderSuppliers() {
     let suppliers = pbGetSuppliers();
     let listEl = document.getElementById('supplierList');
     if(!listEl) return;
@@ -12857,7 +13027,10 @@ function pbSaveBill() {
             let updatedRetail=[];
             items.forEach(it=>{
                 let p=products.find(x=>x.name&&x.name.trim().toLowerCase()===it.name.trim().toLowerCase());
-                if(p){ if(p.stockQty===null||p.stockQty===undefined) p.stockQty=0; p.stockQty+=it.qty; p.inStock=true; updatedRetail.push(p); }
+                if(p){ if(p.stockQty===null||p.stockQty===undefined) p.stockQty=0; p.stockQty+=it.qty; p.inStock=true; updatedRetail.push(p);
+                    // ✅ FIX: Ledger mein purchase stock addition log karo
+                    _logPurchaseStockAdd(it.name, false, it.qty, p.stockQty, billId);
+                }
             });
             /* products → Supabase via bulk upsert (N+1 fix) */
             if(updatedRetail.length > 0) {
@@ -12883,7 +13056,10 @@ function pbSaveBill() {
             // b2bProducts already in-memory from Supabase
             items.forEach(it=>{
                 let p=b2bProducts.find(x=>x.name&&x.name.trim().toLowerCase()===it.name.trim().toLowerCase());
-                if(p){ if(p.stockQty===null||p.stockQty===undefined) p.stockQty=0; p.stockQty+=it.qty; p.inStock=true; }
+                if(p){ if(p.stockQty===null||p.stockQty===undefined) p.stockQty=0; p.stockQty+=it.qty; p.inStock=true;
+                    // ✅ FIX: Ledger mein purchase stock addition log karo (wholesale)
+                    _logPurchaseStockAdd(it.name, true, it.qty, p.stockQty, billId);
+                }
             });
             // b2b saved to Supabase via saveB2B()
             saveB2B();
@@ -13312,7 +13488,7 @@ function wiGenerateInvoice() {
         ).then(function(res){ if(res && res.error) console.log('WI counter sync failed:', res.error.message); });
     } catch(e) { console.log('WI counter Supabase error:', e.message); }
 
-    // Save to localStorage
+    // ✅ v40: In-memory array update + Supabase sync (no localStorage)
     let wiBills = _wiBills;
     wiBills.unshift({ id: invNo, customer: d.customer, phone: d.phone, date: d.date, total: grandTotal, data: d });
     // ✅ FIX v36: Truncation se pehle admin ko toast warning dikhao
@@ -13322,7 +13498,7 @@ function wiGenerateInvoice() {
         wiBills = wiBills.slice(0, 200);
     }
     _wiBills = wiBills;
-    // ✅ FIX: Wholesale bills Supabase mein bhi sync karo
+    // ✅ v40: Primary sync — Supabase mein save karo (only source of truth)
     try {
         db.from('settings').upsert(
             { key: 'nexdrop_wi_bills', value: JSON.stringify(wiBills) },
@@ -13825,12 +14001,14 @@ function loadUnitsDisplay() {
         let units = getUnits(type);
         let container = document.getElementById(type + 'UnitsList');
         if(!container) return;
-        container.innerHTML = units.map(u =>
-            `<span style="display:inline-flex;align-items:center;gap:4px;background:${type==='retail'?'#e8f5e9':'#fff3e0'};border:1px solid ${type==='retail'?'#a5d6a7':'#f0c88a'};border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;color:${type==='retail'?'#2c5a4a':'#c49a6c'};">
-                ${u}
-                <button onclick="deleteUnit('${type}','${u}')" style="background:none;border:none;color:#ff4444;cursor:pointer;font-size:0.75rem;padding:0;line-height:1;">✕</button>
-            </span>`
-        ).join('');
+        container.innerHTML = units.map(u => {
+            // ✅ FIX BUG-A: unit name ko onclick mein safely encode karo (single quotes + special chars)
+            const safeU = u.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+            return `<span style="display:inline-flex;align-items:center;gap:4px;background:${type==='retail'?'#e8f5e9':'#fff3e0'};border:1px solid ${type==='retail'?'#a5d6a7':'#f0c88a'};border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;color:${type==='retail'?'#2c5a4a':'#c49a6c'};">
+                ${esc(u)}
+                <button onclick="deleteUnit('${type}','${safeU}')" style="background:none;border:none;color:#ff4444;cursor:pointer;font-size:0.75rem;padding:0;line-height:1;">✕</button>
+            </span>`;
+        }).join('');
     });
 }
 function addUnit(type) {
@@ -14497,7 +14675,7 @@ function loadCategoryTagsList() {
     let cats = getCategories();
     el.innerHTML = cats.map((c,i) =>
         `<span style="display:inline-flex;align-items:center;gap:3px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:20px;padding:3px 10px;font-size:0.72rem;font-weight:600;color:#2c5a4a;">
-            ${c}
+            ${esc(c)}
             <button onclick="renameCategory(${i})" title="Rename" style="background:none;border:none;color:#1565c0;cursor:pointer;font-size:0.7rem;padding:0 1px;line-height:1;">✏️</button>
             <button onclick="removeCategoryTag(${i})" title="Delete" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:0.7rem;padding:0;line-height:1;">✕</button>
         </span>`
@@ -14521,15 +14699,15 @@ function renameCategory(i) {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;';
     overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:1.4rem 1.2rem;width:88%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.22);">'
         + '<div style="font-size:0.95rem;font-weight:700;color:#2c5a4a;margin-bottom:0.8rem;">✏️ Category Rename</div>'
-        + '<input id="_renameCatInput" type="text" value="' + oldName.replace(/"/g,'&quot;') + '" style="width:100%;padding:0.6rem 0.8rem;border:1.5px solid #2c5a4a;border-radius:10px;font-size:0.9rem;margin-bottom:0.9rem;box-sizing:border-box;">'
+        + '<input id="_renameCatInput" type="text" style="width:100%;padding:0.6rem 0.8rem;border:1.5px solid #2c5a4a;border-radius:10px;font-size:0.9rem;margin-bottom:0.9rem;box-sizing:border-box;">'
         + '<div style="display:flex;gap:0.6rem;">'
         + '<button id="_renameCatSave" style="flex:1;background:#2c5a4a;color:white;border:none;padding:0.6rem;border-radius:10px;font-weight:700;cursor:pointer;">✅ Save</button>'
         + '<button onclick="document.getElementById(\'_renameCatModal\').remove()" style="flex:1;background:#eee;color:#333;border:none;padding:0.6rem;border-radius:10px;font-weight:600;cursor:pointer;">Cancel</button>'
         + '</div></div>';
     document.body.appendChild(overlay);
-
+    // ✅ FIX SEC#4: value DOM property se set karo (safe, no HTML injection) — innerHTML attribute injection prevent
     let inp = document.getElementById('_renameCatInput');
-    if(inp) inp.focus();
+    if(inp) { inp.value = oldName; inp.focus(); }
 
     document.getElementById('_renameCatSave').onclick = function() {
         let newName = document.getElementById('_renameCatInput').value.trim();
@@ -14805,6 +14983,7 @@ function saveCoupons(arr) {
             return {
                 code: c.code, type: c.type || 'flat', value: c.value || 0,
                 min_order: c.minOrder || 0, max_uses: c.maxUses || 0,
+                per_user_limit: c.perUserLimit || 0, // ✅ BUG#3 FIX v39.4
                 used_count: c.usedCount || 0, expiry: c.expiry || null,
                 description: c.desc || '', active: c.active !== false
             };
@@ -14822,15 +15001,17 @@ function addCoupon() {
     let value = parseFloat(document.getElementById('cpValue')?.value) || 0;
     let minOrder = parseFloat(document.getElementById('cpMinOrder')?.value) || 0;
     let maxUses = parseInt(document.getElementById('cpMaxUses')?.value) || 0;
+    let perUserLimit = parseInt(document.getElementById('cpPerUserLimit')?.value) || 0; // ✅ BUG#3 FIX v39.4
     let expiry = document.getElementById('cpExpiry')?.value || '';
     let desc = document.getElementById('cpDesc')?.value || '';
     if(!code) { showToast('❌ Coupon code likhein!', '#ff4444'); return; }
+    if(!/^[A-Z0-9_-]{2,20}$/.test(code)) { showToast('❌ Code sirf A-Z, 0-9, _ ya - hona chahiye (2-20 chars)!', '#ff4444'); return; } // 🔒 FIX: onclick injection prevent
     if(type !== 'free_shipping' && value <= 0) { showToast('❌ Discount value dalein!', '#ff4444'); return; }
     let coupons = getCoupons();
     if(coupons.find(c => c.code === code)) { showToast('⚠️ Yeh code pehle se hai!', '#ff9800'); return; }
-    coupons.push({ code, type, value, minOrder, maxUses, usedCount: 0, expiry, desc, active: true, createdAt: new Date().toISOString() });
+    coupons.push({ code, type, value, minOrder, maxUses, perUserLimit, usedCount: 0, expiry, desc, active: true, createdAt: new Date().toISOString() });
     saveCoupons(coupons);
-    ['cpCode','cpValue','cpMinOrder','cpMaxUses','cpExpiry','cpDesc'].forEach(id => { let el=document.getElementById(id); if(el) el.value=''; });
+    ['cpCode','cpValue','cpMinOrder','cpMaxUses','cpPerUserLimit','cpExpiry','cpDesc'].forEach(id => { let el=document.getElementById(id); if(el) el.value=''; });
     // ✅ FIX: cpType dropdown bhi reset karo — default 'flat'
     let cpTypeEl = document.getElementById('cpType'); if(cpTypeEl) cpTypeEl.value = 'flat';
     loadCouponsList();
@@ -14856,7 +15037,7 @@ function loadCouponsList() {
                     ${!c.active?'<span style="background:#f5f5f5;color:#999;padding:0.1rem 0.5rem;border-radius:20px;font-size:0.6rem;font-weight:700;">INACTIVE</span>':''}
                 </div>
                 <div style="font-size:0.68rem;color:#888;margin-top:2px;">
-                    ${esc(c.desc||'—')} &nbsp;|&nbsp; Min: ₹${c.minOrder||0} &nbsp;|&nbsp; Uses: ${c.usedCount}/${c.maxUses||'∞'} &nbsp;|&nbsp; Expiry: ${expLabel}
+                    ${esc(c.desc||'—')} &nbsp;|&nbsp; Min: ₹${c.minOrder||0} &nbsp;|&nbsp; Uses: ${c.usedCount}/${c.maxUses||'∞'} &nbsp;|&nbsp; Per User: ${c.perUserLimit||'∞'} &nbsp;|&nbsp; Expiry: ${expLabel}
                 </div>
             </div>
             <div style="display:flex;gap:0.3rem;">
@@ -14913,6 +15094,7 @@ async function applyCoupon() {
             let mapped = freshData.map(function(c) {
                 return { code: c.code, type: c.type||'flat', value: c.value||0,
                     minOrder: c.min_order||0, maxUses: c.max_uses||0,
+                    perUserLimit: c.per_user_limit||0, // ✅ BUG#3 FIX v39.4
                     usedCount: c.used_count||0, expiry: c.expiry||'',
                     desc: c.description||'', active: c.active!==false };
             });
@@ -14925,6 +15107,20 @@ async function applyCoupon() {
     if(!coupon) { showToast('❌ Invalid ya inactive coupon!', '#ff4444'); return; }
     if(coupon.expiry && new Date(coupon.expiry) < new Date()) { showToast('⏰ This coupon has expired!', '#ff9800'); return; }
     if(coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) { showToast('❌ This coupon has reached its usage limit!', '#ff9800'); return; }
+    // ✅ BUG#3 FIX v39.4: Per-user coupon limit check — same user baar baar same coupon na use kare
+    // perUserLimit field: 0 = unlimited, N = max N times per user
+    if(coupon.perUserLimit && coupon.perUserLimit > 0 && currentUser) {
+        let userEmail = currentUser.email || '';
+        let userPhone = currentUser.phone || '';
+        let userUsageCount = (orders || []).filter(function(o) {
+            let isCurrentUser = (userEmail && o.userId === userEmail) || (userPhone && o.customerPhone === userPhone);
+            return isCurrentUser && o.couponCode && o.couponCode.toUpperCase() === code;
+        }).length;
+        if(userUsageCount >= coupon.perUserLimit) {
+            showToast('❌ Aapne yeh coupon pehle hi ' + userUsageCount + ' baar use kar liya hai!', '#ff9800');
+            return;
+        }
+    }
     // Check min order
     let subtotal = cart.reduce((s,i) => s + (i.price * i.quantity), 0);
     if(coupon.minOrder > 0 && subtotal < coupon.minOrder) {
@@ -15172,6 +15368,8 @@ function loadAdminReviews() {
     let el = document.getElementById('adminReviewsList');
     let sumEl = document.getElementById('reviewsSummaryCards');
     if(!el) return;
+    // ✅ FIX: Supabase se fresh reviews load karo phir render karo
+    loadReviewsFromSupabase().then(function() {
     let reviews = getReviews();
     let filterProduct = document.getElementById('reviewFilterProduct')?.value||'';
     let filterStars = document.getElementById('reviewFilterStars')?.value||'';
@@ -15227,6 +15425,7 @@ function loadAdminReviews() {
             </div>
         </div>`;
     }).join('');
+    }); // ✅ FIX: loadReviewsFromSupabase().then() close
 }
 // ✅ v32: Product modal review functions
 let _pdmProductName = '';
@@ -15640,7 +15839,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // ──────────────────────────────────────────────
 // We patch via a wrapper around the original function call
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize categories from localStorage first (instant render)
+    // Initialize categories from in-memory cache (instant render before Supabase loads)
     populateCategoryDropdowns();
     loadCategoryTagsList();
     updateHeroCategoryCount();
@@ -15973,7 +16172,7 @@ function printPnLReport() {
 // Supabase se slider images load karo
 async function sbLoadSliderImages() {
     try {
-        const { data, error } = await db.from('settings').select('value').eq('key', 'slider_images').single();
+        const { data, error } = await db.from('settings').select('value').eq('key', 'slider_images').maybeSingle(); // ✅ FIX v39.5: .single() → .maybeSingle() (row missing pe crash prevent)
         if(error) throw error;
         if(data && data.value) {
             const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
@@ -15981,9 +16180,9 @@ async function sbLoadSliderImages() {
             return arr;
         }
     } catch(e) {
-        console.log('Supabase slider load failed, using localStorage:', e.message);
+        console.log('Supabase slider load failed, in-memory default use hoga:', e.message);
     }
-    // fallback: localStorage
+    // fallback: in-memory cache
     if(_sliderImages.length) return _sliderImages;
     return null;
 }
@@ -16001,7 +16200,7 @@ async function sbSaveSliderImages(arr) {
     } catch(e) {
         console.log('Supabase slider save failed:', e.message);
     }
-    // localStorage mein bhi save karo as backup
+    // ✅ v40: In-memory cache update (no localStorage)
     _sliderImages = arr;
 }
 
@@ -16280,6 +16479,7 @@ async function distRegister() {
 
 // 🔒 FIX: Distributor login brute-force guard — same pattern as _adminLoginGuard
 const _distLoginGuard = (function() {
+    // ✅ v40: localStorage → sessionStorage — brute-force state session-scoped hona chahiye
     const STORE_FAILS = 'dlg_f';
     const STORE_LOCK  = 'dlg_l';
     const MAX_FAILS   = 5;
@@ -16526,10 +16726,17 @@ function adminRenderDistributors() {
             <div style="display:flex;gap:0.4rem;margin-top:0.6rem;flex-wrap:wrap;">
                 ${d.status !== 'approved' ? `<button onclick="adminUpdateDistStatus(${d.id},'approved')" style="background:#27ae60;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">✅ Approve</button>` : ''}
                 ${d.status !== 'rejected' ? `<button onclick="adminUpdateDistStatus(${d.id},'rejected')" style="background:#e74c3c;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">❌ Reject</button>` : ''}
-                <button onclick="window.open('https://wa.me/91${(d.phone||'').replace(/\\D/g,'')}?text='+encodeURIComponent('Dear '+d.name+', Your Nexdrop Distributor account has been approved. Please login at our website.'),'_blank')" style="background:#25D366;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">💬 WhatsApp</button>
+                <button onclick="adminDistWhatsApp('${esc(d.phone||'')}','${esc(d.name||'')}','${d.id}')" style="background:#25D366;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">💬 WhatsApp</button>
                 <button onclick="adminDeleteDistributor(${d.id})" style="background:#ff5252;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">🗑️ Delete</button>
             </div>
         </div>`).join('');
+}
+
+// 🔒 FIX M2: Separate function — d.name XSS in inline onclick fixed
+function adminDistWhatsApp(phone, name, id) {
+    var cleanPhone = '91' + (phone || '').replace(/\D/g, '');
+    var msg = encodeURIComponent('Dear ' + name + ', Your Nexdrop Distributor account has been approved. Please login at our website.');
+    window.open('https://wa.me/' + cleanPhone + '?text=' + msg, '_blank');
 }
 
 async function adminUpdateDistStatus(id, status) {
@@ -16596,7 +16803,9 @@ async function distLoadProductCatalog() {
     try {
         const { data, error } = await db.from('products').select('*').eq('in_stock', true).order('category');
         if (!error && data && data.length > 0) {
-            window.products = data.map(p => ({
+            // ✅ v40.1 CRITICAL FIX: window.products overwrite hata diya — global products array corrupt ho raha tha
+            // Dist catalog ke liye alag variable use karo: window._distCatalogProducts
+            window._distCatalogProducts = data.map(p => ({
                 id: p.id, name: p.name, price: p.price || 0, mrp: p.mrp || 0,
                 category: p.category || '', imageType: p.image_type || 'emoji',
                 imageValue: p.image_value || '🌾', inStock: p.in_stock !== false,
@@ -16604,7 +16813,7 @@ async function distLoadProductCatalog() {
             }));
         }
     } catch(e) { console.log('distLoadProductCatalog error:', e.message); }
-    const prods = window.products || [];
+    const prods = window._distCatalogProducts || [];
     if (!prods.length) { el.innerHTML = '<p style="color:#999;text-align:center;">No products available.</p>'; return; }
     const cats = [...new Set(prods.map(p => p.category).filter(Boolean))];
     const filterEl = document.getElementById('distCatFilter');
@@ -16621,7 +16830,8 @@ async function distLoadProductCatalog() {
 function distRenderCatalog(cat) {
     const el = document.getElementById('distProductCatalog');
     if (!el) return;
-    const prods = (window.products || []).filter(p => cat === 'all' || p.category === cat);
+    // ✅ v40.1 FIX: window.products → window._distCatalogProducts (global products corrupt hone se bachao)
+    const prods = (window._distCatalogProducts || []).filter(p => cat === 'all' || p.category === cat);
     el.innerHTML = prods.map(p => `
         <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #eee;border-radius:10px;padding:0.7rem 0.8rem;margin-bottom:0.5rem;background:white;">
             <div>
@@ -16772,7 +16982,8 @@ function distOnProductChange() {
     const sel = document.getElementById('distOrderProduct');
     const infoEl = document.getElementById('distSelectedProductInfo');
     if (!sel.value) { infoEl.style.display = 'none'; return; }
-    const p = (window.products || []).find(x => String(x.id) === String(sel.value));
+    // ✅ v40.1 FIX: window.products → window._distCatalogProducts
+    const p = (window._distCatalogProducts || []).find(x => String(x.id) === String(sel.value));
     if (p) {
         infoEl.style.display = 'block';
         infoEl.innerHTML = `<b>${esc(p.name)}</b> — ₹${p.price} per unit ${p.minQty > 1 ? '| Min Qty: ' + p.minQty : ''} ${p.stockQty ? '| Stock: ' + p.stockQty : ''}`;
@@ -16785,7 +16996,8 @@ function distAddToCart() {
     if (!sel.value) { showToast('⚠️ Product select karein', '#e67e22'); return; }
     const qty = parseInt(qtyEl.value);
     if (!qty || qty <= 0) { showToast('⚠️ Valid quantity enter karein', '#e67e22'); return; }
-    const p = (window.products || []).find(x => String(x.id) === String(sel.value));
+    // ✅ v40.1 FIX: window.products → window._distCatalogProducts
+    const p = (window._distCatalogProducts || []).find(x => String(x.id) === String(sel.value));
     if (!p) return;
     // ✅ FIX v36.19.8: minQty validation — minimum order quantity enforce karo
     const minQty = parseInt(p.minQty) || 1;
@@ -16843,7 +17055,10 @@ async function distPlaceOrder() {
         address: addr || (currentDistributor.city + ', ' + currentDistributor.state),
         items: _distCart.map(c => {
             // 🔒 FIX: GST slab snapshot at order time
-            let prodRef = (window.products || []).find(pr => String(pr.id) === String(c.id)) || (window.b2bProducts || []).find(pr => String(pr.id) === String(c.id));
+            // ✅ v40.1 FIX: _distCatalogProducts first, then global products fallback (don't rely on polluted global)
+            let prodRef = (window._distCatalogProducts || []).find(pr => String(pr.id) === String(c.id))
+                       || (window.products || []).find(pr => String(pr.id) === String(c.id))
+                       || (window.b2bProducts || []).find(pr => String(pr.id) === String(c.id));
             return { id: c.id, name: c.name, qty: c.qty, price: c.price, type: c.type || 'retail', gstSlab: (prodRef && prodRef.gstSlab != null) ? prodRef.gstSlab : 5 };
         }),
         total: grandTotal,
@@ -16880,20 +17095,21 @@ async function distPlaceOrder() {
 async function distLoadAnalytics() {
     if (!currentDistributor) return;
     try {
-        const orders = _distAllOrders.length ? _distAllOrders : await sbDistGetOrders(currentDistributor.email);
-        _distAllOrders = orders;
+        // ✅ FIX CQ#4: 'orders' renamed to 'distOrders' — global orders array shadow prevent karo
+        const distOrders = _distAllOrders.length ? _distAllOrders : await sbDistGetOrders(currentDistributor.email);
+        _distAllOrders = distOrders;
 
         // KPI cards
-        const total = orders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
-        const avg = orders.length ? (total / orders.length).toFixed(0) : 0;
+        const total = distOrders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
+        const avg = distOrders.length ? (total / distOrders.length).toFixed(0) : 0;
         const now = new Date();
-        const thisMonth = orders.filter(o => { const d = new Date(o.date || o.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+        const thisMonth = distOrders.filter(o => { const d = new Date(o.date || o.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
         const thisMonthTotal = thisMonth.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
-        const delivered = orders.filter(o => (o.status || '').toLowerCase().includes('delivered')).length;
+        const delivered = distOrders.filter(o => (o.status || '').toLowerCase().includes('delivered')).length;
 
         const avgEl = document.getElementById('distAvgOrder'); if (avgEl) avgEl.textContent = '₹' + avg;
         const tmEl = document.getElementById('distThisMonthVal'); if (tmEl) tmEl.textContent = '₹' + thisMonthTotal.toFixed(0);
-        const toEl = document.getElementById('distTotalOrders'); if (toEl) toEl.textContent = orders.length;
+        const toEl = document.getElementById('distTotalOrders'); if (toEl) toEl.textContent = distOrders.length;
         const dlEl = document.getElementById('distDeliveredCount'); if (dlEl) dlEl.textContent = delivered;
 
         // Monthly bar chart — last 6 months
@@ -16903,7 +17119,7 @@ async function distLoadAnalytics() {
             const months = [];
             for (let i = 5; i >= 0; i--) {
                 const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                const mo = orders.filter(o => { const od = new Date(o.date || o.created_at); return od.getMonth() === d.getMonth() && od.getFullYear() === d.getFullYear(); });
+                const mo = distOrders.filter(o => { const od = new Date(o.date || o.created_at); return od.getMonth() === d.getMonth() && od.getFullYear() === d.getFullYear(); });
                 months.push({ label: d.toLocaleString('default', { month: 'short' }), value: mo.reduce((s, o) => s + (parseFloat(o.total) || 0), 0) });
             }
             const maxVal = Math.max(...months.map(m => m.value), 1);
@@ -16921,7 +17137,7 @@ async function distLoadAnalytics() {
         const topEl = document.getElementById('distTopProducts');
         if (topEl) {
             const prodMap = {};
-            orders.forEach(o => { (o.items || []).forEach(i => { const n = i.name || i.productName || 'Item'; prodMap[n] = (prodMap[n] || 0) + (i.quantity || 1); }); });
+            distOrders.forEach(o => { (o.items || []).forEach(i => { const n = i.name || i.productName || 'Item'; prodMap[n] = (prodMap[n] || 0) + (i.quantity || 1); }); });
             const sorted = Object.entries(prodMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
             if (!sorted.length) { topEl.innerHTML = '<p style="color:#999;text-align:center;">No order data yet.</p>'; return; }
             const maxQty = sorted[0][1];
@@ -17050,12 +17266,14 @@ async function distLoadDocsList() {
         const { data: sbData, error: sbErr } = await db.from('settings').select('value').eq('key', key).maybeSingle();
         if (!sbErr && sbData && sbData.value) {
             docs = typeof sbData.value === 'string' ? JSON.parse(sbData.value) : sbData.value;
-            _origLSSet(key, JSON.stringify(docs)); // cache update
+            // ✅ FIX BUG#2: _origLSSet no-op tha — removed
         } else {
-            docs = JSON.parse(_origLSGet(key) || '[]'); // fallback
+            // ✅ FIX BUG#2: _origLSGet no-op tha — empty array fallback
+            docs = [];
         }
     } catch(e) {
-        docs = JSON.parse(_origLSGet(key) || '[]');
+        // ✅ FIX BUG#2: _origLSGet no-op tha — empty array fallback
+        docs = [];
     }
     if (!docs.length) { el.innerHTML = '<p style="font-size:0.75rem;color:#aaa;margin-bottom:0.5rem;">No documents uploaded yet.</p>'; return; }
     el.innerHTML = docs.map((d, i) => `
@@ -17087,7 +17305,8 @@ async function distUploadDoc(input) {
                     docs = typeof sbData.value === 'string' ? JSON.parse(sbData.value) : sbData.value;
                 }
             } catch(e2) {
-                docs = JSON.parse(_origLSGet(key) || '[]');
+                // ✅ FIX BUG#2: _origLSGet no-op hai — empty array fallback
+                docs = [];
             }
             docs.push({ name: file.name, size: (file.size / 1024).toFixed(0) + ' KB', date: new Date().toLocaleDateString('en-IN'), base64 });
             // ✅ PRIMARY: Supabase mein full data (base64 included) save karo
@@ -17095,8 +17314,7 @@ async function distUploadDoc(input) {
                 await db.from('settings').upsert({ key: key, value: JSON.stringify(docs) }, { onConflict: 'key' });
                 console.log('distDocs Supabase mein save ho gaye:', docs.length);
             } catch(e3) { console.log('distDocs Supabase save err:', e3.message); }
-            // Cache: localStorage mein bhi rakho (offline/fast read)
-            _origLSSet(key, JSON.stringify(docs));
+            // ✅ FIX BUG#2: _origLSSet no-op tha — removed (Supabase is primary, no local cache needed)
             statusEl.textContent = '✅ Document uploaded!'; statusEl.style.color = '#27ae60';
             distLoadDocsList();
             setTimeout(() => { statusEl.textContent = ''; }, 3000);
@@ -17108,8 +17326,8 @@ async function distUploadDoc(input) {
 
 async function distDeleteDoc(index) {
     if (!currentDistributor) return;
-    // ✅ FIX: confirm() → 2-step toast
-    let _docDelKey = '_delDoc_' + docId;
+    // ✅ FIX BUG#1: docId → index (docId was undefined — ReferenceError fixed)
+    let _docDelKey = '_delDoc_' + index;
     if(!window[_docDelKey]) {
         window[_docDelKey] = true;
         showToast('⚠️ Document delete karna hai? Dobara click karein.', '#ff9800');
@@ -17125,10 +17343,12 @@ async function distDeleteDoc(index) {
         if (!sbErr && sbData && sbData.value) {
             docs = typeof sbData.value === 'string' ? JSON.parse(sbData.value) : sbData.value;
         } else {
-            docs = JSON.parse(_origLSGet(key) || '[]');
+            // ✅ FIX BUG#2: _origLSGet no-op hai — empty array fallback use karo
+            docs = [];
         }
     } catch(e) {
-        docs = JSON.parse(_origLSGet(key) || '[]');
+        // ✅ FIX BUG#2: _origLSGet no-op hai — empty array fallback use karo
+        docs = [];
     }
     docs.splice(index, 1);
     // ✅ PRIMARY: Supabase mein update karo
@@ -17139,8 +17359,7 @@ async function distDeleteDoc(index) {
             await db.from('settings').upsert({ key: key, value: JSON.stringify(docs) }, { onConflict: 'key' });
         }
     } catch(e) { console.log('distDeleteDoc Supabase err:', e.message); }
-    // Cache update
-    _origLSSet(key, JSON.stringify(docs));
+    // ✅ FIX BUG#2: _origLSSet no-op tha — removed (no cache needed, Supabase is primary)
     distLoadDocsList();
     showToast('🗑️ Document deleted', '#e74c3c');
 }
@@ -17150,9 +17369,10 @@ async function distLoadRecentOrders() {
     const el = document.getElementById('distRecentOrders');
     if (!el) return;
     try {
-        const orders = await sbDistGetOrders(currentDistributor.email);
-        _distAllOrders = orders;
-        const recent = orders.slice(0, 3);
+        // ✅ FIX CQ#4: 'orders' → 'distOrders' — global orders array shadow prevent
+        const distOrders = await sbDistGetOrders(currentDistributor.email);
+        _distAllOrders = distOrders;
+        const recent = distOrders.slice(0, 3);
         const statusColor = { pending: '#e67e22', shipped: '#8e44ad', delivered: '#27ae60', cancelled: '#e74c3c' };
         if (!recent.length) { el.innerHTML = '<p style="color:#999;text-align:center;padding:0.5rem;">No orders yet.</p>'; return; }
         el.innerHTML = recent.map(o => {
@@ -17169,10 +17389,10 @@ async function distLoadRecentOrders() {
                 </div>
             </div>`;
         }).join('');
-        const total = orders.reduce((s,o) => s+(parseFloat(o.total)||0),0);
-        const pending = orders.filter(o=>(o.status||'').toLowerCase().includes('pending')).length;
-        const delivered = orders.filter(o=>(o.status||'').toLowerCase().includes('delivered')).length;
-        document.getElementById('distStatOrders').textContent = orders.length;
+        const total = distOrders.reduce((s,o) => s+(parseFloat(o.total)||0),0);
+        const pending = distOrders.filter(o=>(o.status||'').toLowerCase().includes('pending')).length;
+        const delivered = distOrders.filter(o=>(o.status||'').toLowerCase().includes('delivered')).length;
+        document.getElementById('distStatOrders').textContent = distOrders.length;
         document.getElementById('distStatAmount').textContent = '₹'+total.toFixed(0);
         document.getElementById('distStatPending').textContent = pending;
         const dEl = document.getElementById('distStatDelivered');
@@ -17186,7 +17406,8 @@ async function distLoadRecentOrders() {
 function distReorder(items) {
     if (!currentDistributor) return;
     _distCart = [];
-    const prods = window.products || [];
+    // ✅ v40.1 FIX: _distCatalogProducts first, then global products fallback
+    const prods = window._distCatalogProducts || window.products || [];
     items.forEach(item => {
         const p = prods.find(x => String(x.id) === String(item.id));
         const price = p ? p.price : (item.price || 0);
@@ -17418,25 +17639,31 @@ async function adminLoadAllDistPayments() {
     var el = document.getElementById('adminDistPayList');
     if (el) el.innerHTML = '<p style="color:#999;text-align:center;padding:1rem;">⏳ Loading all distributor payments…</p>';
     try {
+        // ✅ FIX v39.5: N+1 fix — 2 queries (distributors + bulk settings fetch) instead of N+1
         var res = await db.from('distributors').select('id,name,email').order('name');
         var dists = res.data || [];
         if (!dists.length) {
             if (el) el.innerHTML = '<p style="color:#999;text-align:center;padding:1rem;">No distributors found.</p>';
             return;
         }
+        // Ek hi query mein sab distPayments_ keys bulk fetch karo
+        var bulkRes = await db.from('settings').select('key,value').ilike('key', 'distPayments_%');
+        var paymentRowMap = {};
+        if (bulkRes.data) {
+            bulkRes.data.forEach(function(row) { paymentRowMap[row.key] = row.value; });
+        }
         var all = [];
-        await Promise.all(dists.map(async function(d) {
-            try {
-                var key = 'distPayments_' + d.email;
-                var r2 = await db.from('settings').select('value').eq('key', key).maybeSingle();
-                if (r2.data && r2.data.value) {
-                    var payments = typeof r2.data.value === 'string' ? JSON.parse(r2.data.value) : r2.data.value;
+        dists.forEach(function(d) {
+            var key = 'distPayments_' + d.email;
+            if (paymentRowMap[key]) {
+                try {
+                    var payments = typeof paymentRowMap[key] === 'string' ? JSON.parse(paymentRowMap[key]) : paymentRowMap[key];
                     payments.forEach(function(p) {
                         all.push({ distEmail: d.email, distName: d.name, distId: d.id, payment: p });
                     });
-                }
-            } catch(e2) {}
-        }));
+                } catch(e2) {}
+            }
+        });
         all.sort(function(a,b) { return new Date(b.payment.date||0) - new Date(a.payment.date||0); });
         _adminAllDistPayments = all;
         // Update pending badge
@@ -17544,20 +17771,26 @@ async function adminLoadAllDistTickets() {
     var el = document.getElementById('adminDistTicketList');
     if (el) el.innerHTML = '<p style="color:#999;text-align:center;padding:1rem;">⏳ Loading all tickets…</p>';
     try {
+        // ✅ FIX v39.5: N+1 fix — 2 queries instead of N+1 (same pattern as adminLoadAllDistPayments)
         var res = await db.from('distributors').select('id,name,email').order('name');
         var dists = res.data || [];
         if (!dists.length) { if (el) el.innerHTML = '<p style="color:#999;text-align:center;">No distributors.</p>'; return; }
+        // Bulk fetch all distTickets_ keys
+        var bulkRes2 = await db.from('settings').select('key,value').ilike('key', 'distTickets_%');
+        var ticketRowMap = {};
+        if (bulkRes2.data) {
+            bulkRes2.data.forEach(function(row) { ticketRowMap[row.key] = row.value; });
+        }
         var all = [];
-        await Promise.all(dists.map(async function(d) {
-            try {
-                var key = 'distTickets_' + d.email;
-                var r2 = await db.from('settings').select('value').eq('key', key).maybeSingle();
-                if (r2.data && r2.data.value) {
-                    var tickets = typeof r2.data.value === 'string' ? JSON.parse(r2.data.value) : r2.data.value;
+        dists.forEach(function(d) {
+            var key = 'distTickets_' + d.email;
+            if (ticketRowMap[key]) {
+                try {
+                    var tickets = typeof ticketRowMap[key] === 'string' ? JSON.parse(ticketRowMap[key]) : ticketRowMap[key];
                     tickets.forEach(function(t) { all.push({ distEmail: d.email, distName: d.name, ticket: t }); });
-                }
-            } catch(e2) {}
-        }));
+                } catch(e2) {}
+            }
+        });
         all.sort(function(a,b) { return new Date(b.ticket.date||0) - new Date(a.ticket.date||0); });
         _adminAllDistTickets = all;
         // Badge — open count
@@ -18065,11 +18298,8 @@ function openOrderSummary() {
     let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0;
     let isFreeShipping = activeCoupon && activeCoupon.type === 'free_shipping';
     let courier = (subtotal >= (settings.freeMin||999) || isFreeShipping) ? 0 : maxCourier;
-    let couponDiscount = 0;
-    if(activeCoupon) {
-        if(activeCoupon.type === 'flat') couponDiscount = Math.min(activeCoupon.value, subtotal);
-        else if(activeCoupon.type === 'percent') couponDiscount = Math.round(subtotal * activeCoupon.value / 100);
-    }
+    // ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
+    let couponDiscount = getCouponDiscount(subtotal);
     let totalDiscount = (mrp - subtotal) + couponDiscount;
     let total = subtotal - couponDiscount + courier;
     if(total < 0) total = 0;
@@ -18252,35 +18482,11 @@ function closeFkModal() {
   ============================================================ -->
 <script>
 // ─────────────────────────────────────────────────────────────
-// FIX 1: CART SESSIONSSTORAGE PERSIST
-// Problem: cart in-memory tha, page refresh pe empty ho jaata tha
-// Fix: sessionStorage use karo (tab-level persistence, no server needed)
+// ✅ FIX: CART SESSIONSSTORAGE PATCH REMOVED (v39.1)
+// saveCart() pehle se hi Supabase settings table mein cart save karta hai
+// sbLoadUserCart() login ke baad Supabase se restore karta hai
+// sessionStorage backup redundant tha — ab zero local storage
 // ─────────────────────────────────────────────────────────────
-(function patchCartPersistence() {
-    // Override saveCart to also write to sessionStorage as backup
-    const _origSaveCart = window.saveCart;
-    window.saveCart = function() {
-        try { sessionStorage.setItem('_ndCart', JSON.stringify(cart)); } catch(e) {}
-        if(_origSaveCart) _origSaveCart.apply(this, arguments);
-    };
-
-    // Override loadCart to restore from sessionStorage if available
-    const _origLoadCart = window.loadCart;
-    window.loadCart = function() {
-        if(_origLoadCart) _origLoadCart.apply(this, arguments);
-        // Try sessionStorage restore (fast, synchronous)
-        try {
-            var saved = sessionStorage.getItem('_ndCart');
-            if(saved) {
-                var arr = JSON.parse(saved);
-                if(Array.isArray(arr) && arr.length > 0) {
-                    cart = arr;
-                    console.log('[PATCH] Cart restored from sessionStorage:', cart.length, 'items');
-                }
-            }
-        } catch(e) {}
-    };
-})();
 
 // ─────────────────────────────────────────────────────────────
 // FIX 2: USER PANEL — MY ORDERS — SUPABASE FRESH FETCH
@@ -18298,9 +18504,9 @@ function closeFkModal() {
 
         // Fresh fetch from Supabase if orders seem incomplete
         var myOrdersInMemory = (orders || []).filter(function(o) {
+            // 🔒 FIX M-2: Name match hataya — non-unique (privacy leak)
             return (o.userId && o.userId === currentUser.email) ||
-                   (o.customerPhone && o.customerPhone === currentUser.phone) ||
-                   (o.customerName && o.customerName === currentUser.name);
+                   (o.customerPhone && o.customerPhone === currentUser.phone);
         });
 
         // If no orders found in-memory OR it's been less than 5 sec since page load — try fresh
@@ -18357,9 +18563,9 @@ function closeFkModal() {
     function _renderUserOrders() {
         if(!currentUser) return;
         var userOrders = (orders || []).filter(function(o) {
+            // 🔒 FIX M-2: Name match hataya — non-unique (privacy leak)
             return (o.userId && o.userId === currentUser.email) ||
-                   (o.customerPhone && o.customerPhone === currentUser.phone) ||
-                   (o.customerName && o.customerName === currentUser.name);
+                   (o.customerPhone && o.customerPhone === currentUser.phone);
         });
         var ordersEl = document.getElementById('userOrders');
         if(!ordersEl) return;
@@ -18399,6 +18605,9 @@ function closeFkModal() {
             // Note
             var noteHtml = o.adminNote ? '<div style="margin-top:0.4rem;padding:0.3rem 0.5rem;background:#fff3e0;border-radius:6px;font-size:0.68rem;border-left:3px solid #ff9800;">📝 ' + esc(o.adminNote) + '</div>' : '';
 
+            // ✅ FIX: Order status timeline
+            var timelineHtml = (o.status !== 'Cancelled') ? '<div style="margin-top:0.5rem;">' + buildOrderTimeline(o.status || 'Pending') + '</div>' : '';
+
             // Payment status badge
             var psColor = (o.paymentStatus || '').toUpperCase() === 'PAID' ? '#2e7d32' : '#e65100';
             var psLabel = (o.paymentStatus || 'PENDING').toUpperCase();
@@ -18424,6 +18633,7 @@ function closeFkModal() {
                         '<span style="font-size:0.63rem;background:' + (psLabel === 'PAID' ? '#e8f5e9' : '#fff3e0') + ';color:' + psColor + ';padding:2px 7px;border-radius:20px;border:1px solid ' + (psLabel === 'PAID' ? '#c8e6c9' : '#ffe0b2') + ';font-weight:700;">' + psLabel + '</span>' +
                     '</div>' +
                     noteHtml +
+                    timelineHtml +
                     '<div style="margin-top:0.5rem;">' +
                         '<button onclick="openBillModal(\'' + o.id + '\')" style="width:100%;background:#2c5a4a;color:white;border:none;padding:0.4rem;border-radius:8px;font-size:0.72rem;cursor:pointer;font-weight:600;">🧾 View Bill & Details</button>' +
                     '</div>' +
@@ -18505,11 +18715,8 @@ function closeFkModal() {
                 var maxCourier = cart.length > 0 ? Math.max.apply(null, cart.map(function(i) { return i.courierCharge||0; })) : 0;
                 var isFreeShipping = activeCoupon && activeCoupon.type === 'free_shipping';
                 var courier = (subtotal >= ((settings && settings.freeMin) || 999) || isFreeShipping) ? 0 : maxCourier;
-                var couponDiscount = 0;
-                if(activeCoupon) {
-                    if(activeCoupon.type === 'flat') couponDiscount = Math.min(activeCoupon.value, subtotal);
-                    else if(activeCoupon.type === 'percent') couponDiscount = Math.round(subtotal * activeCoupon.value / 100);
-                }
+                // ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
+                var couponDiscount = getCouponDiscount(subtotal);
                 window._upiTotal = subtotal - couponDiscount + courier;
                 if(window._upiTotal < 0) window._upiTotal = 0;
                 window._upiId = (settings && settings.upiId) || '43459091963@sbi';
@@ -18521,21 +18728,9 @@ function closeFkModal() {
 })();
 
 // ─────────────────────────────────────────────────────────────
-// FIX 4: CART CLEAR KARO sessionStorage SE BHI
-// Problem: cart.length === 0 ke baad sessionStorage stale rehta tha
+// ✅ FIX v39.2: Cart sessionStorage patch removed — saveCart() Supabase-primary hai
+// patchRemoveFromCart sessionStorage backup bhi hataya — Supabase se sync hota hai
 // ─────────────────────────────────────────────────────────────
-(function patchRemoveFromCart() {
-    var _origRemoveFromCart = window.removeFromCart;
-    window.removeFromCart = function() {
-        if(_origRemoveFromCart) _origRemoveFromCart.apply(this, arguments);
-        try { sessionStorage.setItem('_ndCart', JSON.stringify(cart)); } catch(e) {}
-    };
-    var _origUpdateQty = window.updateQty;
-    window.updateQty = function() {
-        if(_origUpdateQty) _origUpdateQty.apply(this, arguments);
-        try { sessionStorage.setItem('_ndCart', JSON.stringify(cart)); } catch(e) {}
-    };
-})();
 
 // ─────────────────────────────────────────────────────────────
 // FIX 5: OPEN USER PANEL — Orders auto-refresh karo
@@ -18673,7 +18868,9 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
     });
 
     // Patch loadDashboard to also refresh wishlist (and load from Supabase)
+    var _patchWL_tries = 0; // 🔒 FIX L-2: Max retry limit — memory leak prevent
     var _patchWL = setInterval(function() {
+        if(++_patchWL_tries > 40) { clearInterval(_patchWL); return; } // 40×200ms = 8s max
         if(typeof window.loadDashboard !== 'function') return;
         clearInterval(_patchWL);
         var _origLD = window.loadDashboard;
@@ -18805,7 +19002,9 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
     };
 
     // Patch _renderUserOrders to add action buttons
+    var _patchOA_tries = 0; // 🔒 FIX L-2: Max retry limit
     var _patchOA = setInterval(function() {
+        if(++_patchOA_tries > 40) { clearInterval(_patchOA); return; } // 40×500ms = 20s max
         if(typeof window._renderUserOrders !== 'function') return;
         clearInterval(_patchOA);
         var _origRUO = window._renderUserOrders;
@@ -18815,9 +19014,9 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
             setTimeout(function() {
                 if(!currentUser) return;
                 var userOrders = (orders || []).filter(function(o) {
+                    // 🔒 FIX M-2: Name match hataya — non-unique (privacy leak)
                     return (o.userId && o.userId === currentUser.email) ||
-                           (o.customerPhone && o.customerPhone === currentUser.phone) ||
-                           (o.customerName && o.customerName === currentUser.name);
+                           (o.customerPhone && o.customerPhone === currentUser.phone);
                 });
                 var ordersEl = document.getElementById('userOrders');
                 if(!ordersEl) return;
@@ -18992,7 +19191,9 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
     });
 
     // Patch loadDashboard
+    var _patchNotif_tries = 0; // 🔒 FIX L-2: Max retry limit
     var _patchNotif = setInterval(function() {
+        if(++_patchNotif_tries > 40) { clearInterval(_patchNotif); return; } // 40×400ms = 16s max
         if(typeof window.loadDashboard !== 'function') return;
         clearInterval(_patchNotif);
         var _origLD3 = window.loadDashboard;
@@ -19065,13 +19266,23 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
         }, 600);
     });
 
+    var _patchCH_tries = 0; // 🔒 FIX L-2: Max retry limit
     var _patchCH = setInterval(function() {
+        if(++_patchCH_tries > 40) { clearInterval(_patchCH); return; } // 40×500ms = 20s max
         if(typeof window.loadDashboard !== 'function') return;
         clearInterval(_patchCH);
         var _origLD4 = window.loadDashboard;
         window.loadDashboard = function() {
             _origLD4.apply(this, arguments);
-            setTimeout(renderCouponHistory, 150);
+            // ✅ BUG#5 FIX v39.4: 150ms → 1500ms (orders Supabase se load hone ka time)
+            // Retry mechanism: agar orders abhi bhi empty hain toh 3s baad phir try karo
+            setTimeout(function() {
+                renderCouponHistory();
+                // Retry if orders not yet loaded
+                if(!orders || orders.length === 0) {
+                    setTimeout(renderCouponHistory, 3000);
+                }
+            }, 1500);
         };
     }, 500);
 })();
@@ -19160,6 +19371,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 700);
 });
 
+console.log('✅ [v41.1] BUG FIX AUDIT: [M-1] doForgotPassword brute force guard added (_userLoginGuard.isLocked + recordFail); [M-2] name-based order match removed (6 locations — privacy leak fix); [M-3] _userLoginGuard declaration moved before usage (TDZ safety); [M-4] settings.adminUsername leak removed; [M-5] users[].password in-memory sync removed; [L-2] setInterval max retry ×4 (patchWL/OA/Notif/CH); [C-3] unsafe-eval removed from CSP');
+console.log('✅ [v41.0] SECURITY AUDIT FIXES: [C1] User login brute force (_userLoginGuard 5 fail→5min lockout); [C3] Seller portal sellerHash→hashPassword/verifyPassword (salted SHA-256); [H1] Carousel esc(p.name) XSS fix; [H3] exportUsersOnly password strip; [M1] safeSave error surfacing; [M2] adminDistWhatsApp helper (XSS-safe); [M5] SW registration improved (try /sw.js first)');
+console.log('✅ [v40.2] SETTINGS AUDIT: importMergeData+importReplaceData bills fix (safeSave→sbSaveBill); clearAllTestData: _wiBills/_pbBills/_khataCustomers/_khataEntries/savedItems reset added; dead _origLSRemove removed; WI/PB/khata UI refresh added post-reset');
+console.log('✅ [PATCH v40.3] SECURITY FIXES: #1 XSS esc(q) searchHomeProducts line 11937, #2 Coupon code regex validation [A-Z0-9_-], #3 Admin idle auto-logout 30min, #4 Stock unsaved changes banner, #5 liveStockColor banner sync');
+console.log('✅ [v40.1] FULL RE-VERIFY AUDIT: CRITICAL distLoadProductCatalog window.products overwrite fixed → _distCatalogProducts; distRenderCatalog+distOnProductChange+distAddToCart+distPlaceOrder+distReorder patched; stale comments cleaned (checkout, loadCart, safeSave header)');
+console.log('✅ [PATCH v39.4] BUG FIXES: #1 deleteOrder key undefined, #2 _logStockDeduction Delivered, #3 perUserLimit coupon, #4 getCouponDiscount centralized (6 duplicates), #5 couponHistory timing 150→1500ms+retry');
+console.log('✅ [PATCH v39.2] ZERO localStorage: rls_dismissed→sessionStorage, cart sessionStorage backup removed (Supabase primary)');console.log('✅ [PATCH v39.1] Audit fixes: BUG#1 distDeleteDoc(docId→index), BUG#2 _origLSGet/_origLSSet no-ops removed, BUG#3 ignoreDuplicates unsupported removed, BUG#4 GST display consistency (computedGstTotal), BUG#5 multi-slab GST label, SEC#3 category XSS esc(), SEC#4 renameModal DOM property, CQ#4 orders→distOrders shadow fix');
 console.log('✅ [PATCH v39.0] 4 Admin Distributor features: Sub-tabs, Payment Verification, Support Ticket Management, Credit Limit + Manual Ledger');
 console.log('✅ [PATCH v38.0] 5 User Panel features added: Wishlist, Cancel/Return, Notifications, Coupon History, Download Bill');
 </script>
