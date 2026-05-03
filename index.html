@@ -2273,8 +2273,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <!-- Retail Category Filter Tabs -->
     <div id="retailTabsContainer" style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.5rem;">
         <button id="retailTab_all" class="hp-tab hp-tab-active" onclick="filterRetailProducts('all')">🛍️ All Retail</button>
-        <button id="retailTab_tea" class="hp-tab" onclick="filterRetailProducts('tea')">☕ Tea</button>
-        <button id="retailTab_makhana" class="hp-tab" onclick="filterRetailProducts('makhana')">🌾 Makhana</button>
+        <!-- ✅ v36.21: Tea/Makhana + all other retail category tabs rendered dynamically at runtime -->
     </div>
 
     <!-- Retail Tea Heading -->
@@ -4233,68 +4232,11 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 
 <!-- Stock Manager Tab -->
 <div id="tab-stock" class="tab-content">
-  <!-- Category stock summary cards -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.6rem;margin-bottom:1rem;">
-    <div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;padding:0.75rem;text-align:center;border:2px solid #1565c0;">
-      <div style="font-size:1.5rem;font-weight:800;color:#1565c0;" id="sm_rtea_total">0</div>
-      <div style="font-size:0.7rem;color:#1565c0;font-weight:600;">☕ Retail Tea</div>
-    </div>
-    <div style="background:linear-gradient(135deg,#e0f2f1,#b2dfdb);border-radius:12px;padding:0.75rem;text-align:center;border:2px solid #00695c;">
-      <div style="font-size:1.5rem;font-weight:800;color:#00695c;" id="sm_wtea_total">0</div>
-      <div style="font-size:0.7rem;color:#00695c;font-weight:600;">🍵 Wholesale Tea</div>
-    </div>
-    <div style="background:linear-gradient(135deg,#f3e5f5,#e1bee7);border-radius:12px;padding:0.75rem;text-align:center;border:2px solid #7b1fa2;">
-      <div style="font-size:1.5rem;font-weight:800;color:#7b1fa2;" id="sm_rmak_total">0</div>
-      <div style="font-size:0.7rem;color:#7b1fa2;font-weight:600;">🌾 Retail Makhana</div>
-    </div>
-    <div style="background:linear-gradient(135deg,#fff8e1,#ffecb3);border-radius:12px;padding:0.75rem;text-align:center;border:2px solid #f57f17;">
-      <div style="font-size:1.5rem;font-weight:800;color:#f57f17;" id="sm_wmak_total">0</div>
-      <div style="font-size:0.7rem;color:#f57f17;font-weight:600;">📦 Wholesale Makhana</div>
-    </div>
-    <div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:12px;padding:0.75rem;text-align:center;border:2px solid #2c5a4a;grid-column:span 2;">
-      <div style="font-size:1.5rem;font-weight:800;color:#2c5a4a;" id="sm_total_all">0</div>
-      <div style="font-size:0.7rem;color:#2c5a4a;font-weight:600;">📦 Total Stock (All)</div>
-    </div>
-  </div>
+  <!-- ✅ v36.21: Fully dynamic summary cards — auto-render from getCategories() -->
+  <div id="sm_summary_cards_row" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:0.6rem;margin-bottom:1rem;"></div>
 
-  <!-- ☕ Retail Tea Section -->
-  <div style="background:#e3f2fd;border-radius:14px;padding:1rem;margin-bottom:1rem;border:2px solid #1565c0;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.4rem;">
-      <h4 style="color:#1565c0;margin:0;">☕ Retail Tea — Stock Manager</h4>
-      <button onclick="saveStockCategory('retail_tea')" style="background:#1565c0;color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save Retail Tea</button>
-    </div>
-    <div id="sm_retail_tea_list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.7rem;"></div>
-  </div>
-
-  <!-- 🍵 Wholesale Tea Section -->
-  <div style="background:#e0f2f1;border-radius:14px;padding:1rem;margin-bottom:1rem;border:2px solid #00695c;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.4rem;">
-      <h4 style="color:#00695c;margin:0;">🍵 Wholesale Tea — Stock Manager</h4>
-      <button onclick="saveStockCategory('wholesale_tea')" style="background:#00695c;color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save Wholesale Tea</button>
-    </div>
-    <div id="sm_wholesale_tea_list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.7rem;"></div>
-  </div>
-
-  <!-- 🌾 Retail Makhana Section -->
-  <div style="background:#f3e5f5;border-radius:14px;padding:1rem;margin-bottom:1rem;border:2px solid #7b1fa2;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.4rem;">
-      <h4 style="color:#7b1fa2;margin:0;">🌾 Retail Makhana — Stock Manager</h4>
-      <button onclick="saveStockCategory('retail_makhana')" style="background:#7b1fa2;color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save Retail Makhana</button>
-    </div>
-    <div id="sm_retail_makhana_list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.7rem;"></div>
-  </div>
-
-  <!-- 📦 Wholesale Makhana Section -->
-  <div style="background:#fff8e1;border-radius:14px;padding:1rem;margin-bottom:1rem;border:2px solid #f57f17;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.4rem;">
-      <h4 style="color:#f57f17;margin:0;">📦 Wholesale Makhana — Stock Manager</h4>
-      <button onclick="saveStockCategory('wholesale_makhana')" style="background:#f57f17;color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save Wholesale Makhana</button>
-    </div>
-    <div id="sm_wholesale_makhana_list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.7rem;"></div>
-  </div>
-
-  <!-- 🏷️ Custom Categories (dynamically rendered) -->
-  <div id="sm_custom_categories_container"></div>
+  <!-- ✅ v36.21: Fully dynamic category sections — no hardcoded Tea/Makhana -->
+  <div id="sm_sections_container"></div>
 
   <!-- Save All button -->
   <button onclick="saveAllStock()" style="width:100%;background:linear-gradient(135deg,#2c5a4a,#1a3f34);color:white;border:none;padding:0.8rem;border-radius:14px;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:1rem;">💾 Save All Stock (All Categories)</button>
@@ -10523,143 +10465,186 @@ function liveStockColor(prefix, id) {
 }
 
 // Read current input values and update the category totals shown in stock tab header
+// ✅ v36.21: Fully dynamic live totals — saari categories handle karta hai
 function updateCategoryTotalsLive() {
-    let rtea=0, wtea=0, rmak=0, wmak=0;
-    let customTotals = {}; // elementId → accumulated qty
+    // Accumulate live totals from DOM inputs per category
+    let catTotals = {}; // 'sm_sum_{safe}' → qty
+    let grandTotal = 0;
 
-    [...products].forEach(p => {
-        let cat4 = getProductCategory4(p, false);
+    products.forEach(p => {
+        let cat = (p.category||'').trim() || 'Uncategorized';
         let el = document.getElementById('smv2_retail_' + p.id);
         let qty = el ? (parseInt(el.value)||0) : (p.stockQty||0);
-        if(cat4==='retail_tea') rtea += qty;
-        else if(cat4==='retail_makhana') rmak += qty;
-        else {
-            // ✅ FIX: accumulate custom retail totals
-            let slug = cat4.replace('custom_retail:','').toLowerCase().replace(/\s+/g,'_');
-            let elId = 'sm_custom_retail_total_' + slug;
-            customTotals[elId] = (customTotals[elId]||0) + qty;
-        }
+        let safeId = 'sm_sum_' + cat.toLowerCase().replace(/[^a-z0-9]/g,'_');
+        catTotals[safeId] = (catTotals[safeId]||0) + qty;
+        grandTotal += qty;
     });
-    [...b2bProducts].forEach(p => {
-        let cat4 = getProductCategory4(p, true);
+    b2bProducts.forEach(p => {
+        let cat = (p.category||'').trim() || 'Uncategorized';
         let el = document.getElementById('smv2_b2b_' + p.id);
         let qty = el ? (parseInt(el.value)||0) : (p.stockQty||0);
-        if(cat4==='wholesale_tea') wtea += qty;
-        else if(cat4==='wholesale_makhana') wmak += qty;
-        else {
-            // ✅ FIX: accumulate custom b2b totals
-            let slug = cat4.replace('custom_b2b:','').toLowerCase().replace(/\s+/g,'_');
-            let elId = 'sm_custom_b2b_total_' + slug;
-            customTotals[elId] = (customTotals[elId]||0) + qty;
-        }
+        let safeId = 'sm_sum_' + cat.toLowerCase().replace(/[^a-z0-9]/g,'_');
+        catTotals[safeId] = (catTotals[safeId]||0) + qty;
+        grandTotal += qty;
     });
 
     let setEl = (id,v) => { let e=document.getElementById(id); if(e) e.innerText=v; };
-    setEl('sm_rtea_total', rtea);
-    setEl('sm_wtea_total', wtea);
-    setEl('sm_rmak_total', rmak);
-    setEl('sm_wmak_total', wmak);
-
-    // ✅ FIX: Update each custom section header + compute accurate grand total
-    let customTotal = 0;
-    for(let elId in customTotals) {
-        setEl(elId, customTotals[elId]);
-        customTotal += customTotals[elId];
-    }
-    // ✅ FIX: sm_total_all ab stale DOM reads pe depend nahi karta
-    setEl('sm_total_all', rtea + wtea + rmak + wmak + customTotal);
+    for(let id in catTotals) setEl(id, catTotals[id]);
+    setEl('sm_total_all', grandTotal);
 }
 
+// ✅ v36.21: Fully dynamic Stock Manager — koi bhi hardcoded category nahi
+// Har category getCategories() se auto-detect hoti hai
 function loadStockManager() {
-    // Use in-memory data (already synced from Supabase on load)
-
-    let rtea=[], wtea=[], rmak=[], wmak=[];
-    // Custom categories: key = 'custom_retail:<Cat>' or 'custom_b2b:<Cat>'
-    let customBuckets = {};
-
-    products.forEach(p => {
-        let c = getProductCategory4(p, false);
-        if(c==='retail_tea') rtea.push(p);
-        else if(c==='retail_makhana') rmak.push(p);
-        else { if(!customBuckets[c]) customBuckets[c] = []; customBuckets[c].push(p); }
-    });
-    b2bProducts.forEach(p => {
-        let c = getProductCategory4(p, true);
-        if(c==='wholesale_tea') wtea.push(p);
-        else if(c==='wholesale_makhana') wmak.push(p);
-        else { if(!customBuckets[c]) customBuckets[c] = []; customBuckets[c].push(p); } // ✅ FIX: custom_b2b categories alag bucket mein
-    });
-
-    let setSection = (listId, arr, isB2B, color, emptyMsg) => {
-        let el = document.getElementById(listId);
-        if(!el) return;
-        if(arr.length === 0) { el.innerHTML = '<div style="color:#999;font-size:0.8rem;padding:0.5rem;">'+emptyMsg+'</div>'; return; }
-        el.innerHTML = arr.map(p => buildStockCard(p, isB2B, color)).join('');
-    };
-
-    setSection('sm_retail_tea_list',    rtea, false, '#1565c0', 'No Retail Tea products. Add them in Products tab with Tea category.');
-    setSection('sm_wholesale_tea_list', wtea, true,  '#00695c', 'No Wholesale Tea products. Add them in B2B tab with Tea category.');
-    setSection('sm_retail_makhana_list',rmak, false, '#7b1fa2', 'No Retail Makhana products found.');
-    setSection('sm_wholesale_makhana_list', wmak, true, '#f57f17', 'No Wholesale Makhana products. Add them in B2B tab.');
-
-    // ── Dynamic Custom Category Sections ──
-    let customContainer = document.getElementById('sm_custom_categories_container');
-    if(customContainer) {
-        if(Object.keys(customBuckets).length === 0) {
-            customContainer.innerHTML = '';
-        } else {
-            // Palette of colors for custom categories
-            let palette = ['#e91e63','#00838f','#558b2f','#6a1b9a','#e65100','#1565c0','#2e7d32','#ad1457'];
-            let paletteIdx = 0;
-            let html = '';
-            for(let key in customBuckets) {
-                let arr = customBuckets[key];
-                let isB2B = key.startsWith('custom_b2b:');
-                let catName = key.replace('custom_retail:','').replace('custom_b2b:','');
-                let slug = catName.toLowerCase().replace(/\s+/g,'_');
-                let prefix = isB2B ? 'b2b' : 'retail';
-                let typeLabel = isB2B ? 'Wholesale' : 'Retail';
-                let color = palette[paletteIdx % palette.length]; paletteIdx++;
-                let saveFn = `saveCustomCategoryStock('${key}')`;
-                let lightBg = color + '18'; // very light bg using hex opacity
-                let totalQty = arr.reduce((s,p) => s + (p.stockQty||0), 0);
-
-                html += `<div style="background:${lightBg};border-radius:14px;padding:1rem;margin-bottom:1rem;border:2px solid ${color};">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.4rem;">
-                        <div>
-                            <h4 style="color:${color};margin:0;">🏷️ ${esc(catName)} — ${typeLabel} Stock Manager</h4>
-                            <span style="font-size:0.7rem;color:#888;">Total: <b id="sm_custom_${prefix}_total_${slug}">${totalQty}</b> units</span>
-                        </div>
-                        <button onclick="${saveFn}" style="background:${color};color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save ${esc(catName)}</button>
-                    </div>
-                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.7rem;">
-                        ${arr.map(p => buildStockCard(p, isB2B, color)).join('')}
-                    </div>
-                </div>`;
-            }
-            customContainer.innerHTML = html;
-        }
+    // ── Color palette (cycled per category) ──
+    const _smPalette = [
+        {color:'#1565c0', light:'#e3f2fd'},
+        {color:'#00695c', light:'#e0f2f1'},
+        {color:'#7b1fa2', light:'#f3e5f5'},
+        {color:'#e65100', light:'#fff8e1'},
+        {color:'#e91e63', light:'#fce4ec'},
+        {color:'#2e7d32', light:'#e8f5e9'},
+        {color:'#3949ab', light:'#e8eaf6'},
+        {color:'#ad1457', light:'#fce4ec'},
+        {color:'#00838f', light:'#e0f7fa'},
+        {color:'#558b2f', light:'#f1f8e9'},
+    ];
+    function _smEmoji(name) {
+        let n = (name||'').toLowerCase();
+        return n.includes('tea')||n.includes('chai') ? '☕'
+             : n.includes('makhana') ? '🌾'
+             : n.includes('personal care')||n.includes('care') ? '🧴'
+             : n.includes('spice')||n.includes('masala') ? '🌶️'
+             : n.includes('honey') ? '🍯'
+             : n.includes('gift') ? '🎁'
+             : '🏷️';
     }
 
-    // ✅ FIX: Stock summary — ab B2B/Wholesale products bhi include hote hain
+    // ── Bucket products by their stored category ──
+    let retailBuckets = {};
+    let b2bBuckets = {};
+    products.forEach(p => {
+        let cat = (p.category||'').trim() || 'Uncategorized';
+        if(!retailBuckets[cat]) retailBuckets[cat] = [];
+        retailBuckets[cat].push(p);
+    });
+    b2bProducts.forEach(p => {
+        let cat = (p.category||'').trim() || 'Uncategorized';
+        if(!b2bBuckets[cat]) b2bBuckets[cat] = [];
+        b2bBuckets[cat].push(p);
+    });
+
+    // ── Get ordered category list from getCategories(), fallback to buckets ──
+    let knownCats = (typeof getCategories==='function') ? getCategories() : [];
+    let allCatSet = new Set(knownCats.map(c=>c.trim()).filter(Boolean));
+    // Also include any p.category values not in getCategories() (data drift)
+    [...Object.keys(retailBuckets), ...Object.keys(b2bBuckets)].forEach(c => allCatSet.add(c));
+    // Sort: retail before wholesale for same base; alphabetical
+    let sortedCats = [...allCatSet].sort((a,b) => {
+        let al = a.toLowerCase(), bl = b.toLowerCase();
+        let ar = al.startsWith('retail'), bw = bl.startsWith('wholesale');
+        if(ar && bw) return -1; if(!ar && !bw) return al.localeCompare(bl);
+        return al.localeCompare(bl);
+    });
+
+    // ── Build summary cards ──
+    let summaryHtml = '';
+    let grandTotal = 0;
+    let pidx = 0;
+    sortedCats.forEach(cat => {
+        let lower = cat.toLowerCase();
+        let isRetail = lower.startsWith('retail ');
+        let isWholesale = lower.startsWith('wholesale ');
+        if(!isRetail && !isWholesale) return;
+        let s = _smPalette[pidx++ % _smPalette.length];
+        let bucket = isRetail ? (retailBuckets[cat]||[]) : (b2bBuckets[cat]||[]);
+        let total = bucket.reduce((sum,p) => sum+(p.stockQty||0), 0);
+        grandTotal += total;
+        let safeId = 'sm_sum_' + cat.toLowerCase().replace(/[^a-z0-9]/g,'_');
+        summaryHtml += `<div style="background:linear-gradient(135deg,${s.light},${s.light}cc);border-radius:12px;padding:0.75rem;text-align:center;border:2px solid ${s.color};">
+            <div style="font-size:1.5rem;font-weight:800;color:${s.color};" id="${safeId}">${total}</div>
+            <div style="font-size:0.7rem;color:${s.color};font-weight:600;">${_smEmoji(cat)} ${esc(cat)}</div>
+        </div>`;
+    });
+    summaryHtml += `<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:12px;padding:0.75rem;text-align:center;border:2px solid #2c5a4a;grid-column:span 2;">
+        <div style="font-size:1.5rem;font-weight:800;color:#2c5a4a;" id="sm_total_all">${grandTotal}</div>
+        <div style="font-size:0.7rem;color:#2c5a4a;font-weight:600;">📦 Total Stock (All)</div>
+    </div>`;
+    let summaryRow = document.getElementById('sm_summary_cards_row');
+    if(summaryRow) summaryRow.innerHTML = summaryHtml;
+
+    // ── Build category sections ──
+    let sectionsHtml = '';
+    pidx = 0;
+    sortedCats.forEach(cat => {
+        let lower = cat.toLowerCase();
+        let isRetail = lower.startsWith('retail ');
+        let isWholesale = lower.startsWith('wholesale ');
+        if(!isRetail && !isWholesale) return;
+        let s = _smPalette[pidx++ % _smPalette.length];
+        let isB2B = isWholesale;
+        let bucket = isB2B ? (b2bBuckets[cat]||[]) : (retailBuckets[cat]||[]);
+        let typeLabel = isB2B ? 'Wholesale' : 'Retail';
+        let emoji = _smEmoji(cat);
+        let totalQty = bucket.reduce((sum,p) => sum+(p.stockQty||0), 0);
+        let safeId = 'sm_sum_' + cat.toLowerCase().replace(/[^a-z0-9]/g,'_');
+        // saveFn: pass category name + isB2B flag
+        let catEsc = cat.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        let saveFn = `saveDynStockSection('${catEsc}',${isB2B})`;
+        let cardsHtml = bucket.length===0
+            ? `<div style="color:#999;font-size:0.8rem;padding:0.5rem;">No ${esc(cat)} products. Add from ${isB2B?'B2B':'Products'} tab with category "${esc(cat)}".</div>`
+            : bucket.map(p => buildStockCard(p, isB2B, s.color)).join('');
+        sectionsHtml += `<div style="background:${s.light};border-radius:14px;padding:1rem;margin-bottom:1rem;border:2px solid ${s.color};" data-cat-section="${esc(cat.toLowerCase())}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.4rem;">
+                <div>
+                    <h4 style="color:${s.color};margin:0;">${emoji} ${esc(cat)} — ${typeLabel} Stock Manager</h4>
+                    <span style="font-size:0.7rem;color:#888;">Total: <b id="${safeId}">${totalQty}</b> units</span>
+                </div>
+                <button onclick="${saveFn}" style="background:${s.color};color:white;border:none;padding:0.35rem 1rem;border-radius:20px;font-size:0.75rem;cursor:pointer;font-weight:600;">💾 Save ${esc(cat)}</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.7rem;">${cardsHtml}</div>
+        </div>`;
+    });
+    let sectionsContainer = document.getElementById('sm_sections_container');
+    if(sectionsContainer) sectionsContainer.innerHTML = sectionsHtml;
+
+    // ── Stock summary box ──
     let allProds = [...products, ...b2bProducts];
-    let inStockCount = allProds.filter(p => p.inStock).length;
-    // ✅ FIX: hardcoded <=10 hata diya — per-product reorder level use karo
-    let lowStockCount = allProds.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty > 0 && p.stockQty <= getReorderLevel(p.id, p._isB2B !== undefined ? p._isB2B : b2bProducts.some(b => b.id === p.id))).length;
+    let inStockCount  = allProds.filter(p => p.inStock).length;
+    let lowStockCount = allProds.filter(p => p.stockQty != null && p.stockQty > 0 && p.stockQty <= getReorderLevel(p.id, b2bProducts.some(b=>b.id===p.id))).length;
     let outStockCount = allProds.filter(p => p.stockQty === 0).length;
     let summaryEl = document.getElementById('stockSummary');
     if(summaryEl) summaryEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.6rem;">
         <div style="background:#e8f5e9;border-radius:10px;padding:0.7rem;text-align:center;"><div style="font-size:1.4rem;font-weight:700;color:#2c5a4a;">${inStockCount}</div><div style="font-size:0.7rem;">✅ In Stock</div></div>
         <div style="background:#fff3e0;border-radius:10px;padding:0.7rem;text-align:center;"><div style="font-size:1.4rem;font-weight:700;color:#ff9800;">${lowStockCount}</div><div style="font-size:0.7rem;">⚠️ Low Stock</div></div>
         <div style="background:#ffebee;border-radius:10px;padding:0.7rem;text-align:center;"><div style="font-size:1.4rem;font-weight:700;color:#ff4444;">${outStockCount}</div><div style="font-size:0.7rem;">❌ Out of Stock</div></div>
-        <div style="background:#f5f0ea;border-radius:10px;padding:0.7rem;text-align:center;"><div style="font-size:1.4rem;font-weight:700;color:#c49a6c;">${products.length + b2bProducts.length}</div><div style="font-size:0.7rem;">📦 Total Products</div></div>
+        <div style="background:#f5f0ea;border-radius:10px;padding:0.7rem;text-align:center;"><div style="font-size:1.4rem;font-weight:700;color:#c49a6c;">${allProds.length}</div><div style="font-size:0.7rem;">📦 Total Products</div></div>
     </div>`;
     updateCategoryTotalsLive();
-    // ✅ v36.20: Reorder level panel bhi load karo
-    if(typeof loadReorderLevelList === 'function') loadReorderLevelList();
+    if(typeof loadReorderLevelList==='function') loadReorderLevelList();
+}
+
+// ✅ v36.21: Universal save function for any dynamic category section
+function saveDynStockSection(catName, isB2B) {
+    let prefix = isB2B ? 'b2b' : 'retail';
+    let arr = isB2B ? b2bProducts : products;
+    let changed = 0;
+    arr.forEach(p => {
+        let pCat = (p.category||'').trim();
+        if(pCat !== catName) return;
+        let el = document.getElementById('smv2_' + prefix + '_' + p.id);
+        if(el) { p.stockQty = Math.max(0, parseInt(el.value)||0); p.inStock = p.stockQty > 0; changed++; }
+    });
+    if(isB2B) { saveB2B(); displayB2B(); if(typeof displayHomeProducts==='function') displayHomeProducts(); }
+    else { saveProducts(); displayProducts(); }
+    refreshStockDashboard();
+    loadStockManager();
+    showToast('✅ ' + catName + ' stock saved! (' + changed + ' products)', '#2c5a4a');
 }
 
 // Save stock for one category
+// ✅ v36.21: Legacy function — ab koi bhi button ye directly call nahi karta.
+// saveDynStockSection() ne replace kar diya. Backward compat ke liye rakha hai.
 function saveStockCategory(cat4) {
     let changed = 0;
     if(cat4 === 'retail_tea' || cat4 === 'retail_makhana') {
@@ -14955,18 +14940,19 @@ function populateCategoryDropdowns() {
         });
     }
 
-    // ── Dynamic tabs: Retail section (custom categories auto-add) ──
+    // ── Dynamic tabs: Retail section — ALL categories from getCategories() ──
     let retailContainer = document.getElementById('retailTabsContainer');
     if(retailContainer) {
         // Static tabs ke alawa sab hata do
         retailContainer.querySelectorAll('.hp-tab-dynamic').forEach(el => el.remove());
-        let customRetailCats = (typeof getCategories === 'function' ? getCategories() : [])
-            .filter(c => c.toLowerCase().startsWith('retail ') && !['retail tea','retail makhana'].includes(c.toLowerCase()));
-        customRetailCats.sort().forEach(c => {
+        // ✅ v36.21: Tea/Makhana inclusive — koi category exclude nahi
+        let allRetailCats = (typeof getCategories === 'function' ? getCategories() : [])
+            .filter(c => c.toLowerCase().startsWith('retail '));
+        allRetailCats.sort().forEach(c => {
             let btn = document.createElement('button');
             btn.className = 'hp-tab hp-tab-dynamic';
             let lower = c.toLowerCase();
-            let emoji = lower.includes('tea') || lower.includes('chai') ? '☕' : lower.includes('makhana') ? '🌾' : '🏷️';
+            let emoji = lower.includes('tea') || lower.includes('chai') ? '☕' : lower.includes('makhana') ? '🌾' : lower.includes('personal care') ? '🧴' : '🏷️';
             btn.textContent = emoji + ' ' + c.replace(/^Retail\s+/i,'');
             btn._filterCat = c; // store full name for matching
             btn.onclick = (function(cat){ return function(){ filterRetailProducts('dyncat:' + cat); }; })(c);
