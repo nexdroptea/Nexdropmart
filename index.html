@@ -1892,6 +1892,24 @@ img { max-width: 100%; height: auto; }
     }
 }
 
+/* --- PRODUCT GRID RESPONSIVE: mobile=2, tablet=3, desktop=4 --- */
+/* Desktop 4 columns */
+@media (min-width: 1025px) {
+    #homeProductGrid { grid-template-columns: repeat(4, 1fr) !important; }
+    #retailTeaGrid, #retailMakhanaGrid, #productGrid {
+        grid-template-columns: repeat(4, 1fr) !important;
+    }
+}
+/* Tablet 3 columns */
+@media (min-width: 769px) and (max-width: 1024px) {
+    #homeProductGrid { grid-template-columns: repeat(3, 1fr) !important; gap: 0.9rem !important; }
+    #retailTeaGrid, #retailMakhanaGrid, #productGrid {
+        grid-template-columns: repeat(3, 1fr) !important;
+    }
+}
+/* Mobile 2 columns (default) */
+#homeProductGrid { grid-template-columns: repeat(2, 1fr); }
+
 /* --- PRODUCT GRID: 2-column on mobile --- */
 @media (max-width: 768px) {
     .product-grid {
@@ -2252,7 +2270,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         
         
     </div>
-    <div id="homeProductGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;padding:0 0.5rem;"></div>
+    <div id="homeProductGrid" style="display:grid;gap:1rem;padding:0 0.5rem;"></div>
     <div style="text-align:center;margin:1.5rem 0 2rem;">
         <button onclick="scrollToProducts()" style="background:#2c5a4a;color:white;border:none;padding:0.7rem 2rem;border-radius:50px;font-weight:600;font-size:0.9rem;cursor:pointer;box-shadow:0 4px 15px rgba(44,90,74,0.3);">View All Products →</button>
     </div>
