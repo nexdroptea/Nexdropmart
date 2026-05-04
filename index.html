@@ -1892,24 +1892,6 @@ img { max-width: 100%; height: auto; }
     }
 }
 
-/* --- PRODUCT GRID RESPONSIVE: mobile=2, tablet=3, desktop=4 --- */
-/* Desktop 4 columns */
-@media (min-width: 1025px) {
-    #homeProductGrid { grid-template-columns: repeat(4, 1fr) !important; }
-    #retailTeaGrid, #retailMakhanaGrid, #productGrid {
-        grid-template-columns: repeat(4, 1fr) !important;
-    }
-}
-/* Tablet 3 columns */
-@media (min-width: 769px) and (max-width: 1024px) {
-    #homeProductGrid { grid-template-columns: repeat(3, 1fr) !important; gap: 0.9rem !important; }
-    #retailTeaGrid, #retailMakhanaGrid, #productGrid {
-        grid-template-columns: repeat(3, 1fr) !important;
-    }
-}
-/* Mobile 2 columns (default) */
-#homeProductGrid { grid-template-columns: repeat(2, 1fr); }
-
 /* --- PRODUCT GRID: 2-column on mobile --- */
 @media (max-width: 768px) {
     .product-grid {
@@ -2270,7 +2252,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         
         
     </div>
-    <div id="homeProductGrid" style="display:grid;gap:1rem;padding:0 0.5rem;"></div>
+    <div id="homeProductGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;padding:0 0.5rem;"></div>
     <div style="text-align:center;margin:1.5rem 0 2rem;">
         <button onclick="scrollToProducts()" style="background:#2c5a4a;color:white;border:none;padding:0.7rem 2rem;border-radius:50px;font-weight:600;font-size:0.9rem;cursor:pointer;box-shadow:0 4px 15px rgba(44,90,74,0.3);">View All Products →</button>
     </div>
@@ -3002,13 +2984,31 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <!-- ===================== DISTRIBUTOR LOGIN MODAL ===================== -->
 <div id="distributorLoginModal" class="modal">
   <div class="modal-content" style="max-width:380px;">
-    <h3 style="color:#2c5a4a;margin-bottom:0.3rem;">🏭 Distributor Portal</h3>
-    <p style="font-size:0.78rem;color:#888;margin-bottom:1rem;">Login to access your distributor dashboard.</p>
-    <input type="email" id="distLoginEmail" placeholder="Registered Email *" style="margin-bottom:0.6rem;">
-    <input type="password" id="distLoginPass" placeholder="Password *" style="margin-bottom:1rem;">
-    <button onclick="distLogin()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;width:100%;padding:0.75rem;border:none;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:0.4rem;">🔓 Login</button>
-    <button onclick="openDistributorSignup()" style="background:#f5f0ea;color:#2c5a4a;width:100%;padding:0.6rem;border:1px solid #c49a6c;border-radius:12px;font-size:0.85rem;cursor:pointer;font-weight:600;margin-bottom:0.4rem;">📝 New Distributor? Register Here</button>
-    <button onclick="closeDistributorLogin()" style="background:#f5f0ea;color:#666;width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:12px;font-size:0.82rem;cursor:pointer;">Cancel</button>
+    <!-- Main Login Form -->
+    <div id="distLoginMainForm">
+      <h3 style="color:#2c5a4a;margin-bottom:0.3rem;">🏭 Distributor Portal</h3>
+      <p style="font-size:0.78rem;color:#888;margin-bottom:1rem;">Login to access your distributor dashboard.</p>
+      <input type="email" id="distLoginEmail" placeholder="Registered Email *" style="margin-bottom:0.6rem;">
+      <input type="password" id="distLoginPass" placeholder="Password *" style="margin-bottom:0.5rem;">
+      <div style="text-align:right;margin-bottom:0.8rem;">
+        <span onclick="showDistForgot()" style="font-size:0.78rem;color:#c49a6c;cursor:pointer;text-decoration:underline;">🔑 Forgot Password?</span>
+      </div>
+      <button onclick="distLogin()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;width:100%;padding:0.75rem;border:none;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:0.4rem;">🔓 Login</button>
+      <button onclick="openDistributorSignup()" style="background:#f5f0ea;color:#2c5a4a;width:100%;padding:0.6rem;border:1px solid #c49a6c;border-radius:12px;font-size:0.85rem;cursor:pointer;font-weight:600;margin-bottom:0.4rem;">📝 New Distributor? Register Here</button>
+      <button onclick="closeDistributorLogin()" style="background:#f5f0ea;color:#666;width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:12px;font-size:0.82rem;cursor:pointer;">Cancel</button>
+    </div>
+    <!-- Forgot Password Form -->
+    <div id="distForgotPassForm" style="display:none;">
+      <p style="font-size:0.85rem;color:#2c5a4a;font-weight:600;margin-bottom:0.3rem;">🔑 Distributor Password Reset</p>
+      <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Registered Email aur Phone number se verify karein.</p>
+      <input type="email" id="distFpEmail" placeholder="Registered Email Address *" style="margin-bottom:0.5rem;">
+      <input type="tel" id="distFpPhone" placeholder="Registered Mobile Number (10 digits) *" style="margin-bottom:0.5rem;" maxlength="10">
+      <input type="password" id="distFpNewPass" placeholder="New Password (min 6 chars) *" style="margin-bottom:0.5rem;">
+      <input type="password" id="distFpConfPass" placeholder="Confirm New Password *" style="margin-bottom:0.5rem;">
+      <div id="distFpMsg" style="font-size:0.78rem;min-height:1.2rem;margin-bottom:0.5rem;text-align:center;padding:0.3rem;border-radius:6px;"></div>
+      <button onclick="doDistForgotPassword()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;width:100%;padding:0.7rem;border:none;border-radius:12px;font-weight:700;cursor:pointer;margin-bottom:0.4rem;">✅ Reset Password</button>
+      <button onclick="hideDistForgot()" style="background:#f5f0ea;color:#2c5a4a;width:100%;padding:0.5rem;border:1px solid #c49a6c;border-radius:12px;font-size:0.85rem;cursor:pointer;">← Back to Login</button>
+    </div>
   </div>
 </div>
 
@@ -3041,13 +3041,31 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <!-- ===================== SELLER LOGIN MODAL ===================== -->
 <div id="sellerLoginModal" class="modal">
   <div class="modal-content" style="max-width:380px;">
-    <h3 style="color:#1a4a8a;margin-bottom:0.3rem;">🏪 Seller Portal</h3>
-    <p style="font-size:0.78rem;color:#888;margin-bottom:1rem;">Login to access your seller dashboard.</p>
-    <input type="email" id="sellerLoginEmail" placeholder="Registered Email *" style="margin-bottom:0.6rem;">
-    <input type="password" id="sellerLoginPass" placeholder="Password *" style="margin-bottom:1rem;">
-    <button onclick="sellerLogin()" style="background:linear-gradient(135deg,#1a4a8a,#e91e63);color:white;width:100%;padding:0.75rem;border:none;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:0.4rem;">🔓 Login</button>
-    <button onclick="openSellerSignup()" style="background:#f0f4ff;color:#1a4a8a;width:100%;padding:0.6rem;border:1px solid #c0caff;border-radius:12px;font-size:0.85rem;cursor:pointer;font-weight:600;margin-bottom:0.4rem;">📝 New Seller? Register Here</button>
-    <button onclick="closeSellerLogin()" style="background:#f5f0ea;color:#666;width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:12px;font-size:0.82rem;cursor:pointer;">Cancel</button>
+    <!-- Main Login Form -->
+    <div id="sellerLoginMainForm">
+      <h3 style="color:#1a4a8a;margin-bottom:0.3rem;">🏪 Seller Portal</h3>
+      <p style="font-size:0.78rem;color:#888;margin-bottom:1rem;">Login to access your seller dashboard.</p>
+      <input type="email" id="sellerLoginEmail" placeholder="Registered Email *" style="margin-bottom:0.6rem;">
+      <input type="password" id="sellerLoginPass" placeholder="Password *" style="margin-bottom:0.5rem;">
+      <div style="text-align:right;margin-bottom:0.8rem;">
+        <span onclick="showSellerForgot()" style="font-size:0.78rem;color:#1a4a8a;cursor:pointer;text-decoration:underline;">🔑 Forgot Password?</span>
+      </div>
+      <button onclick="sellerLogin()" style="background:linear-gradient(135deg,#1a4a8a,#e91e63);color:white;width:100%;padding:0.75rem;border:none;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:0.4rem;">🔓 Login</button>
+      <button onclick="openSellerSignup()" style="background:#f0f4ff;color:#1a4a8a;width:100%;padding:0.6rem;border:1px solid #c0caff;border-radius:12px;font-size:0.85rem;cursor:pointer;font-weight:600;margin-bottom:0.4rem;">📝 New Seller? Register Here</button>
+      <button onclick="closeSellerLogin()" style="background:#f5f0ea;color:#666;width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:12px;font-size:0.82rem;cursor:pointer;">Cancel</button>
+    </div>
+    <!-- Forgot Password Form -->
+    <div id="sellerForgotPassForm" style="display:none;">
+      <p style="font-size:0.85rem;color:#1a4a8a;font-weight:600;margin-bottom:0.3rem;">🔑 Seller Password Reset</p>
+      <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Registered Email aur Phone number se verify karein.</p>
+      <input type="email" id="sellerFpEmail" placeholder="Registered Email Address *" style="margin-bottom:0.5rem;">
+      <input type="tel" id="sellerFpPhone" placeholder="Registered Mobile Number (10 digits) *" style="margin-bottom:0.5rem;" maxlength="10">
+      <input type="password" id="sellerFpNewPass" placeholder="New Password (min 6 chars) *" style="margin-bottom:0.5rem;">
+      <input type="password" id="sellerFpConfPass" placeholder="Confirm New Password *" style="margin-bottom:0.5rem;">
+      <div id="sellerFpMsg" style="font-size:0.78rem;min-height:1.2rem;margin-bottom:0.5rem;text-align:center;padding:0.3rem;border-radius:6px;"></div>
+      <button onclick="doSellerForgotPassword()" style="background:linear-gradient(135deg,#1a4a8a,#e91e63);color:white;width:100%;padding:0.7rem;border:none;border-radius:12px;font-weight:700;cursor:pointer;margin-bottom:0.4rem;">✅ Reset Password</button>
+      <button onclick="hideSellerForgot()" style="background:#f0f4ff;color:#1a4a8a;width:100%;padding:0.5rem;border:1px solid #c0caff;border-radius:12px;font-size:0.85rem;cursor:pointer;">← Back to Login</button>
+    </div>
   </div>
 </div>
 
@@ -5874,10 +5892,40 @@ function updateStats() {
 
         // Uncategorized catch-all
         let allKnown = [...knownRetailCats,...knownWholeCats,...knownBareCats];
-        let uncatRetail = products.reduce((s,p) => !allKnown.includes(normCat(p.category)) ? s+(p.stockQty||0) : s, 0);
-        let uncatWhole  = b2bProducts.reduce((s,p) => !allKnown.includes(normCat(p.category)) ? s+(p.stockQty||0) : s, 0);
-        if(uncatRetail > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#f5f5f5,#eeeeee);border:2px dashed #bdbdbd;min-width:110px;"><div class="stat-number" style="font-size:1.5rem;color:#616161;">${uncatRetail}</div><div style="font-size:0.7rem;color:#616161;font-weight:600;">❓ Other<br><span style="font-size:0.62rem;opacity:0.8;">Retail</span></div></div>`;
-        if(uncatWhole  > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#f5f5f5,#eeeeee);border:2px dashed #bdbdbd;min-width:110px;"><div class="stat-number" style="font-size:1.5rem;color:#616161;">${uncatWhole}</div><div style="font-size:0.7rem;color:#616161;font-weight:600;">❓ Other<br><span style="font-size:0.62rem;opacity:0.8;">Wholesale</span></div></div>`;
+        let orphanRetail = products.filter(p => !allKnown.includes(normCat(p.category)));
+        let orphanWhole  = b2bProducts.filter(p => !allKnown.includes(normCat(p.category)));
+        let uncatRetail = orphanRetail.reduce((s,p) => s+(p.stockQty||0), 0);
+        let uncatWhole  = orphanWhole.reduce((s,p)  => s+(p.stockQty||0), 0);
+        window._orphanRetail = orphanRetail;
+        window._orphanWhole  = orphanWhole;
+        if(uncatRetail > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:2px dashed #ff9800;min-width:110px;cursor:pointer;" onclick="window._cleanupOrphanProducts('retail')" title="Click karein cleanup ke liye"><div class="stat-number" style="font-size:1.5rem;color:#e65100;">${uncatRetail}</div><div style="font-size:0.7rem;color:#bf360c;font-weight:600;">⚠️ Other<br><span style="font-size:0.62rem;opacity:0.8;">Retail (cleanup)</span></div></div>`;
+        if(uncatWhole  > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:2px dashed #ff9800;min-width:110px;cursor:pointer;" onclick="window._cleanupOrphanProducts('wholesale')" title="Click karein cleanup ke liye"><div class="stat-number" style="font-size:1.5rem;color:#e65100;">${uncatWhole}</div><div style="font-size:0.7rem;color:#bf360c;font-weight:600;">⚠️ Other<br><span style="font-size:0.62rem;opacity:0.8;">Wholesale (cleanup)</span></div></div>`;
+        window._cleanupOrphanProducts = function(type) {
+            let arr = type === 'retail' ? (window._orphanRetail||[]) : (window._orphanWhole||[]);
+            if(!arr.length) { showToast('✅ Koi orphan product nahi!', '#2c5a4a'); return; }
+            let names = arr.map(function(p){ return p.name; }).slice(0,5).join(', ') + (arr.length>5?' ...':'');
+            let key = '_orphanClean_' + type;
+            if(!window[key]) {
+                window[key] = true;
+                showToast('⚠️ ' + arr.length + ' products delete honge: ' + names + ' — Dobara click karein!', '#ff9800');
+                setTimeout(function(){ window[key]=false; }, 5000);
+                return;
+            }
+            window[key] = false;
+            let ids = arr.map(function(p){ return p.id; });
+            ids.forEach(function(id) { if(typeof sbDeleteProduct==='function') sbDeleteProduct(id); });
+            if(type === 'retail') {
+                products = products.filter(function(p){ return !ids.includes(p.id); });
+                if(typeof displayProducts==='function') displayProducts();
+                if(typeof loadAdminProducts==='function') loadAdminProducts();
+            } else {
+                b2bProducts = b2bProducts.filter(function(p){ return !ids.includes(p.id); });
+                if(typeof saveB2B==='function') saveB2B();
+                if(typeof loadAdminB2B==='function') loadAdminB2B();
+            }
+            if(typeof updateStats==='function') updateStats();
+            showToast('🗑️ ' + ids.length + ' orphan products cleanup ho gaye!', '#e53935');
+        };
 
         container.innerHTML = html;
     })();
@@ -5989,16 +6037,17 @@ function buildRetailCard(p) {
 let _currentRetailFilter = 'all';
 function filterRetailProducts(cat) {
     _currentRetailFilter = cat;
-    document.querySelectorAll('[id^="retailTab_"]').forEach(t => t.classList.remove('hp-tab-active'));
+    // ✅ v36.22: Clear BOTH static (id-based) AND dynamic (class-based) tabs
+    document.querySelectorAll('[id^="retailTab_"], #retailTabsContainer .hp-tab-dynamic').forEach(t => t.classList.remove('hp-tab-active'));
     // Static tab match
     let activeTab = document.getElementById('retailTab_' + cat);
-    // Dynamic tab match
+    // Dynamic tab match — strip 'dyncat:' prefix before comparing with _filterCat
     if(!activeTab) {
-        retailContainer = document.getElementById('retailTabsContainer');
+        let catToMatch = (cat && cat.startsWith('dyncat:')) ? cat.replace('dyncat:','') : cat;
+        let retailContainer = document.getElementById('retailTabsContainer');
         if(retailContainer) {
             retailContainer.querySelectorAll('.hp-tab-dynamic').forEach(btn => {
-                if(btn._filterCat && btn._filterCat === cat) btn.classList.add('hp-tab-active');
-                else btn.classList.remove('hp-tab-active');
+                if(btn._filterCat && btn._filterCat === catToMatch) btn.classList.add('hp-tab-active');
             });
         }
     }
@@ -9944,6 +9993,9 @@ function openSellerLogin() {
 }
 function closeSellerLogin() {
     document.getElementById('sellerLoginModal').classList.remove('active');
+    // Reset to main login view
+    var mf = document.getElementById('sellerLoginMainForm'); if(mf) mf.style.display = 'block';
+    var ff = document.getElementById('sellerForgotPassForm'); if(ff) ff.style.display = 'none';
 }
 function openSellerSignup() {
     closeSellerLogin();
@@ -9976,8 +10028,16 @@ async function sellerRegister() {
         if (existing) { showToast('⚠️ Is email se pehle se account hai. Login karo.', '#e67e22'); return; }
     } catch(e) {}
 
-    // 🔒 FIX C3: Use hashPassword (salted SHA-256) instead of sellerHash (unsalted)
-    const hash = await hashPassword(pass);
+    // 🔒 FIX C3: hashPassword — try-catch mein wrap karo (HTTP/insecure context silent crash fix)
+    let hash;
+    try {
+        hash = await hashPassword(pass);
+    } catch(e) {
+        console.error('[sellerRegister] hashPassword failed:', e);
+        showToast('❌ Password hashing failed. HTTPS pe open karo ya browser check karo.', '#c62828');
+        return;
+    }
+
     const row = {
         shop_name: shop, owner_name: owner, phone, email,
         city, gstin,
@@ -9988,11 +10048,16 @@ async function sellerRegister() {
     };
     try {
         const { error } = await db.from('sellers').insert([row]);
-        if (error) throw error;
+        if (error) {
+            console.error('[sellerRegister] Supabase insert error:', JSON.stringify(error));
+            throw error;
+        }
         closeSellerSignup();
         showToast('✅ Registration successful! Admin approval ke baad login kar sakte hain. 📞 +91 9006606697', '#1a4a8a');
     } catch(e) {
-        showToast('❌ Registration failed. Please try again or contact: +91 9006606697', '#ff4444');
+        const msg = (e && e.message) ? e.message : 'Unknown error';
+        console.error('[sellerRegister] catch:', msg);
+        showToast('❌ Registration failed: ' + msg, '#ff4444');
     }
 }
 
@@ -10049,6 +10114,56 @@ function sellerLogout() {
     sessionStorage.removeItem('nexdrop_seller_session');
     document.getElementById('sellerDashboard').style.display = 'none';
     showToast('👋 Logged out successfully!', '#1a4a8a');
+}
+
+// ─────────────────────────────────────────────────────────────
+// SELLER FORGOT PASSWORD
+// ─────────────────────────────────────────────────────────────
+function showSellerForgot() {
+    document.getElementById('sellerLoginMainForm').style.display = 'none';
+    document.getElementById('sellerForgotPassForm').style.display = 'block';
+    var msg = document.getElementById('sellerFpMsg');
+    if(msg) { msg.textContent = ''; msg.style.background = ''; msg.style.border = ''; }
+}
+function hideSellerForgot() {
+    document.getElementById('sellerForgotPassForm').style.display = 'none';
+    document.getElementById('sellerLoginMainForm').style.display = 'block';
+    ['sellerFpEmail','sellerFpPhone','sellerFpNewPass','sellerFpConfPass'].forEach(function(id) {
+        var el = document.getElementById(id); if(el) el.value = '';
+    });
+    var msg = document.getElementById('sellerFpMsg');
+    if(msg) { msg.textContent = ''; msg.style.background = ''; msg.style.border = ''; }
+}
+async function doSellerForgotPassword() {
+    var email   = (document.getElementById('sellerFpEmail').value || '').trim().toLowerCase();
+    var phone   = (document.getElementById('sellerFpPhone').value || '').trim().replace(/\D/g, '');
+    var newPass = document.getElementById('sellerFpNewPass').value;
+    var confPass= document.getElementById('sellerFpConfPass').value;
+    var msg     = document.getElementById('sellerFpMsg');
+    function setMsg(text, color) {
+        msg.style.color = color; msg.style.background = color + '18';
+        msg.style.border = '1px solid ' + color + '44'; msg.style.padding = '0.4rem 0.6rem';
+        msg.textContent = text;
+    }
+    if(!email || !email.includes('@'))       { setMsg('❌ Valid email address dalein!', '#ff4444'); return; }
+    if(!phone || phone.length < 10)          { setMsg('❌ Valid 10-digit mobile number dalein!', '#ff4444'); return; }
+    if(!newPass || newPass.length < 6)       { setMsg('❌ Password min 6 characters ka hona chahiye!', '#ff4444'); return; }
+    if(newPass !== confPass)                 { setMsg('❌ Passwords match nahi ho rahe!', '#ff4444'); return; }
+    setMsg('⏳ Verifying... please wait', '#888');
+    try {
+        var r = await db.from('sellers').select('email,phone').eq('email', email).maybeSingle();
+        if(r.error || !r.data) { setMsg('❌ Yeh email registered nahi hai!', '#ff4444'); return; }
+        var storedLast10  = (r.data.phone || '').replace(/\D/g, '').slice(-10);
+        var enteredLast10 = phone.slice(-10);
+        if(storedLast10 !== enteredLast10) { setMsg('❌ Phone number match nahi hua! Registered number dalein.', '#ff4444'); return; }
+        var hashedNew = await hashPassword(newPass);
+        var upR = await db.from('sellers').update({ password_hash: hashedNew }).eq('email', email);
+        if(upR.error) { setMsg('❌ Password update failed: ' + upR.error.message, '#ff4444'); return; }
+        setMsg('✅ Password reset ho gaya! Ab login karein.', '#1a4a8a');
+        setTimeout(function() { hideSellerForgot(); showToast('✅ Seller password reset successful!', '#1a4a8a'); }, 2000);
+    } catch(e) {
+        setMsg('❌ Error: ' + (e.message || 'Please try again'), '#ff4444');
+    }
 }
 
 function openSellerDashboard() {
@@ -14816,18 +14931,48 @@ function removeCategoryTag(i) {
     let _catDelKey = '_delCat_' + i;
     if(!window[_catDelKey]) {
         window[_catDelKey] = true;
-        showToast('⚠️ "' + cats[i] + '" category delete? Dobara click karein.', '#ff9800');
-        setTimeout(function(){ window[_catDelKey]=false; }, 4000);
+        let catName = cats[i];
+        // Count affected products for warning
+        let affRetail = (typeof products !== 'undefined') ? products.filter(p => (p.category||'').toLowerCase().trim() === (catName||'').toLowerCase().trim()).length : 0;
+        let affB2B = (typeof b2bProducts !== 'undefined') ? b2bProducts.filter(p => (p.category||'').toLowerCase().trim() === (catName||'').toLowerCase().trim()).length : 0;
+        let affMsg = (affRetail + affB2B) > 0 ? ' ⚠️ ' + (affRetail + affB2B) + ' products bhi DELETE ho jayenge!' : '';
+        showToast('⚠️ "' + catName + '" category delete?' + affMsg + ' Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_catDelKey]=false; }, 5000);
         return;
     }
     window[_catDelKey] = false;
     let removed = cats.splice(i, 1)[0];
     saveCategories(cats);
     loadCategoryTagsList();
+
+    // ✅ FIX: Us category ke saare products bhi delete karo (retail + b2b dono se)
+    // Taaki dashboard mein "Other" card na aaye
+    let normRemoved = (removed||'').toLowerCase().trim();
+    let normMatch = function(cat) { return (cat||'').toLowerCase().trim() === normRemoved; };
+
+    if(typeof products !== 'undefined') {
+        let delIds = products.filter(p => normMatch(p.category)).map(p => p.id);
+        if(delIds.length > 0) {
+            delIds.forEach(function(id) { if(typeof sbDeleteProduct === 'function') sbDeleteProduct(id); });
+            products = products.filter(p => !delIds.includes(p.id));
+            if(typeof displayProducts === 'function') displayProducts();
+            if(typeof loadAdminProducts === 'function') loadAdminProducts();
+        }
+    }
+    if(typeof b2bProducts !== 'undefined') {
+        let delB2BIds = b2bProducts.filter(p => normMatch(p.category)).map(p => p.id);
+        if(delB2BIds.length > 0) {
+            delB2BIds.forEach(function(id) { if(typeof sbDeleteProduct === 'function') sbDeleteProduct(id); });
+            b2bProducts = b2bProducts.filter(p => !delB2BIds.includes(p.id));
+            if(typeof saveB2B === 'function') saveB2B();
+            if(typeof loadAdminB2B === 'function') loadAdminB2B();
+        }
+    }
+
     // ✅ v31: Stock manager + dashboard refresh
     if(typeof loadStockManager === 'function') loadStockManager();
     if(typeof updateStats === 'function') updateStats();
-    showToast('🗑️ "' + removed + '" removed', '#ff9800');
+    showToast('🗑️ "' + removed + '" category + uske saare products delete ho gaye!', '#ff9800');
 }
 
 // Add Product form se inline new category create karo
@@ -14949,6 +15094,8 @@ function populateCategoryDropdowns() {
             let lower = c.toLowerCase();
             let emoji = lower.startsWith('wholesale') ? '📦' : lower.startsWith('retail') ? '🛒' : '🏷️';
             btn.className = 'hp-tab hp-tab-dynamic';
+            let slug = 'dyncat_' + c.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+            btn.id = 'hpTab_' + slug;
             btn.textContent = emoji + ' ' + c;
             btn.onclick = (function(cat){ return function(){ filterHomeProducts('dyncat:' + cat); }; })(c);
             hpContainer.appendChild(btn);
@@ -16472,6 +16619,9 @@ function openDistributorLogin() {
 }
 function closeDistributorLogin() {
     document.getElementById('distributorLoginModal').classList.remove('active');
+    // Reset to main login view
+    var mf = document.getElementById('distLoginMainForm'); if(mf) mf.style.display = 'block';
+    var ff = document.getElementById('distForgotPassForm'); if(ff) ff.style.display = 'none';
 }
 function openDistributorSignup() {
     closeDistributorLogin();
@@ -16600,6 +16750,56 @@ function distLogout() {
     sessionStorage.removeItem('nexdrop_dist_session');
     document.getElementById('distributorDashboard').style.display = 'none';
     showToast('👋 Logged out successfully!', '#2c5a4a');
+}
+
+// ─────────────────────────────────────────────────────────────
+// DISTRIBUTOR FORGOT PASSWORD
+// ─────────────────────────────────────────────────────────────
+function showDistForgot() {
+    document.getElementById('distLoginMainForm').style.display = 'none';
+    document.getElementById('distForgotPassForm').style.display = 'block';
+    var msg = document.getElementById('distFpMsg');
+    if(msg) { msg.textContent = ''; msg.style.background = ''; msg.style.border = ''; }
+}
+function hideDistForgot() {
+    document.getElementById('distForgotPassForm').style.display = 'none';
+    document.getElementById('distLoginMainForm').style.display = 'block';
+    ['distFpEmail','distFpPhone','distFpNewPass','distFpConfPass'].forEach(function(id) {
+        var el = document.getElementById(id); if(el) el.value = '';
+    });
+    var msg = document.getElementById('distFpMsg');
+    if(msg) { msg.textContent = ''; msg.style.background = ''; msg.style.border = ''; }
+}
+async function doDistForgotPassword() {
+    var email   = (document.getElementById('distFpEmail').value || '').trim().toLowerCase();
+    var phone   = (document.getElementById('distFpPhone').value || '').trim().replace(/\D/g, '');
+    var newPass = document.getElementById('distFpNewPass').value;
+    var confPass= document.getElementById('distFpConfPass').value;
+    var msg     = document.getElementById('distFpMsg');
+    function setMsg(text, color) {
+        msg.style.color = color; msg.style.background = color + '18';
+        msg.style.border = '1px solid ' + color + '44'; msg.style.padding = '0.4rem 0.6rem';
+        msg.textContent = text;
+    }
+    if(!email || !email.includes('@'))       { setMsg('❌ Valid email address dalein!', '#ff4444'); return; }
+    if(!phone || phone.length < 10)          { setMsg('❌ Valid 10-digit mobile number dalein!', '#ff4444'); return; }
+    if(!newPass || newPass.length < 6)       { setMsg('❌ Password min 6 characters ka hona chahiye!', '#ff4444'); return; }
+    if(newPass !== confPass)                 { setMsg('❌ Passwords match nahi ho rahe!', '#ff4444'); return; }
+    setMsg('⏳ Verifying... please wait', '#888');
+    try {
+        var r = await db.from('distributors').select('email,phone').eq('email', email).maybeSingle();
+        if(r.error || !r.data) { setMsg('❌ Yeh email registered nahi hai!', '#ff4444'); return; }
+        var storedLast10  = (r.data.phone || '').replace(/\D/g, '').slice(-10);
+        var enteredLast10 = phone.slice(-10);
+        if(storedLast10 !== enteredLast10) { setMsg('❌ Phone number match nahi hua! Registered number dalein.', '#ff4444'); return; }
+        var hashedNew = await hashPassword(newPass);
+        var upR = await db.from('distributors').update({ password_hash: hashedNew }).eq('email', email);
+        if(upR.error) { setMsg('❌ Password update failed: ' + upR.error.message, '#ff4444'); return; }
+        setMsg('✅ Password reset ho gaya! Ab login karein.', '#2c5a4a');
+        setTimeout(function() { hideDistForgot(); showToast('✅ Distributor password reset successful!', '#2c5a4a'); }, 2000);
+    } catch(e) {
+        setMsg('❌ Error: ' + (e.message || 'Please try again'), '#ff4444');
+    }
 }
 
 // --- Dashboard ---
@@ -19418,7 +19618,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 700);
 });
 
-console.log('✅ [v41.2] FINAL AUDIT — 26 fixes: [D-1] sellerHash removed; [U-1] Guest cart warning; [X-1] esc() 10x showToast; [K-1] Khata 4 guards; [K-2] _kEntKey per-entry; [C-1] coupon minOrder recheck; [S-1] 10 Settings guards (saveCompanySettings,savePaymentSettings,saveSettings,removeLogo,removeQR,clearAllTestData,exportCSV,exportOrders,exportUsers,previewImport); [S-2] sellerDelete guard; [S-3] sendBRCMCustom guard');
+console.log('✅ [v41.3] Seller + Distributor Forgot Password: showSellerForgot/doSellerForgotPassword + showDistForgot/doDistForgotPassword — email+phone verify, hashPassword, Supabase update; closeSellerLogin/closeDistributorLogin reset form state');
 console.log('✅ [v41.1] BUG FIX AUDIT: [M-1] doForgotPassword brute force guard added (_userLoginGuard.isLocked + recordFail); [M-2] name-based order match removed (6 locations — privacy leak fix); [M-3] _userLoginGuard declaration moved before usage (TDZ safety); [M-4] settings.adminUsername leak removed; [M-5] users[].password in-memory sync removed; [L-2] setInterval max retry ×4 (patchWL/OA/Notif/CH); [C-3] unsafe-eval removed from CSP');
 console.log('✅ [v41.0] SECURITY AUDIT FIXES: [C1] User login brute force (_userLoginGuard 5 fail→5min lockout); [C3] Seller portal sellerHash→hashPassword/verifyPassword (salted SHA-256); [H1] Carousel esc(p.name) XSS fix; [H3] exportUsersOnly password strip; [M1] safeSave error surfacing; [M2] adminDistWhatsApp helper (XSS-safe); [M5] SW registration improved (try /sw.js first)');
 console.log('✅ [v40.2] SETTINGS AUDIT: importMergeData+importReplaceData bills fix (safeSave→sbSaveBill); clearAllTestData: _wiBills/_pbBills/_khataCustomers/_khataEntries/savedItems reset added; dead _origLSRemove removed; WI/PB/khata UI refresh added post-reset');
