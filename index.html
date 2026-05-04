@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.9 applied | v41.1 BUG FIX AUDIT: [M-1] Forgot password brute force guard added; [M-2] Name-based order matching removed (6 locations, privacy leak); [M-3] _userLoginGuard moved before usage (TDZ fix); [M-4] settings.adminUsername leak removed; [M-5] in-memory password hash sync removed; [L-2] setInterval max retry (×4 patches); [C-3] unsafe-eval removed from CSP | v41.0 SECURITY AUDIT FIXES below -->
+<!-- 🔒 SECURITY PATCH v2.9 applied | v41.2 AUDIT FIXES: [D-1] sellerHash dead code removed; [U-1] Guest cart login warning added; [X-1] esc() applied to 8 showToast p.name calls (XSS hardening) | v41.1 BUG FIX AUDIT below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -6263,7 +6263,7 @@ function openProductModal(type, id) {
             cartBtn.disabled = false;
             cartBtn.style.background = '#2c5a4a';
             cartBtn.style.cursor = 'pointer';
-            cartBtn.onclick = function() { addToCart(p.id); showToast('✅ '+p.name+' added to cart!'); closeProductModal(); };
+            cartBtn.onclick = function() { addToCart(p.id); showToast('✅ '+esc(p.name)+' added to cart!'); closeProductModal(); };
         } else {
             cartBtn.disabled = true;
             cartBtn.style.background = '#ccc';
@@ -6567,6 +6567,10 @@ function renderExtraImgPreview(type, id) {
 
 // ==================== END PRODUCT MODAL & MULTI-IMAGE ====================
 function addToCart(id, type) {
+    // 🔔 Guest warning: cart in-memory only — refresh pe lost hoga [v41.2]
+    if(!currentUser) {
+        showToast('⚠️ Login karein — cart refresh pe save nahi hoga!', '#e67e22');
+    }
     // Support both retail and b2b/wholesale products
     let p = null, isB2B = false;
     if(type === 'b2b') {
@@ -8454,7 +8458,7 @@ function saveSingleProduct(id) {
     saveProducts();
     displayProducts();
     refreshStockDashboard();
-    showToast('✅ ' + p.name + ' saved!');
+    showToast('✅ ' + esc(p.name) + ' saved!');
 }
 function uploadAdminPhoto(id, input) {
     let file = input.files[0];
@@ -8502,8 +8506,8 @@ function toggleCOD(id) {
         p.codAllowed = p.codAllowed===false ? true : false; 
         saveProducts(); 
         loadAdminProducts(); 
-        if(p.codAllowed===false) showToast('❌ COD disabled for ' + p.name, '#ff9800');
-        else showToast('✅ COD enabled for ' + p.name, '#2c5a4a');
+        if(p.codAllowed===false) showToast('❌ COD disabled for ' + esc(p.name), '#ff9800');
+        else showToast('✅ COD enabled for ' + esc(p.name), '#2c5a4a');
     } 
 }
 // ✅ FIX: confirm() → 2-step toast
@@ -8642,7 +8646,7 @@ function saveSingleB2B(id) {
     displayB2B();
     refreshStockDashboard();
     updateStats();
-    showToast(`✅ ${p.name} saved!`, '#2c5a4a');
+    showToast(`✅ ${esc(p.name)} saved!`, '#2c5a4a');
 }
 
 function updateB2BDiscPrice(id) {
@@ -9095,7 +9099,7 @@ function quickAddStock(id, qty) {
     displayProducts();
     updateStats();
     refreshStockDashboard();
-    showToast('✅ ' + p.name + ' stock: +' + qty + ' → Total: ' + p.stockQty, '#2c5a4a');
+    showToast('✅ ' + esc(p.name) + ' stock: +' + qty + ' → Total: ' + p.stockQty, '#2c5a4a');
 }
 function quickSetStock(id) {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
@@ -9111,7 +9115,7 @@ function quickSetStock(id) {
     displayProducts();
     updateStats();
     refreshStockDashboard();
-    showToast('✅ ' + p.name + ' stock set: ' + val, '#2c5a4a');
+    showToast('✅ ' + esc(p.name) + ' stock set: ' + val, '#2c5a4a');
 }
 
 // ── QUICK STOCK ADD/SET FOR B2B PRODUCTS ──
@@ -9129,7 +9133,7 @@ function quickAddB2BStock(id, qty) {
     displayB2B();
     updateStats();
     refreshStockDashboard();
-    showToast('✅ ' + p.name + ' B2B stock: +' + qty + ' → Total: ' + p.stockQty, '#c49a6c');
+    showToast('✅ ' + esc(p.name) + ' B2B stock: +' + qty + ' → Total: ' + p.stockQty, '#c49a6c');
 }
 function quickSetB2BStock(id) {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
@@ -9145,7 +9149,7 @@ function quickSetB2BStock(id) {
     displayB2B();
     updateStats();
     refreshStockDashboard();
-    showToast('✅ ' + p.name + ' B2B stock set: ' + val, '#c49a6c');
+    showToast('✅ ' + esc(p.name) + ' B2B stock set: ' + val, '#c49a6c');
 }
 
 // ── AUTO-REFRESH DASHBOARD STATS EVERY 30 SECONDS ──
@@ -9421,6 +9425,7 @@ function loadSettingsForm() {
     if(typeof loadCategoryTagsList === 'function') loadCategoryTagsList();
 }
 function saveCompanySettings() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     let cnEl = document.getElementById('settingCompanyName'); if(cnEl) settings.companyName = cnEl.value.trim() || 'Nexdrop Mart';
     let csEl = document.getElementById('settingCompanySubName'); if(csEl) settings.companySubName = csEl.value.trim() || 'Nexdrop Solutions Pvt. Ltd.';
     let logoFile = document.getElementById('settingLogoUpload');
@@ -9456,6 +9461,7 @@ function saveCompanySettings() {
     }
 }
 function removeCompanyLogo() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     // ✅ logo removal — non-destructive, no confirm needed
     delete settings.companyLogo;
     saveSettingsData();
@@ -9463,6 +9469,7 @@ function removeCompanyLogo() {
     showToast('🗑️ Logo removed', '#ff9800');
 }
 function removeQRCode() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     // ✅ QR removal — non-destructive, no confirm needed
     delete settings.qrCodeImage;
     // ✅ FIX v38: Supabase se bhi delete karo
@@ -9485,6 +9492,7 @@ function autoFillSellerStateFromGSTIN() {
 }
 
 function savePaymentSettings() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     let gstinEl = document.getElementById('settingGSTIN'); if(gstinEl) settings.gstin = gstinEl.value.trim().toUpperCase();
     // ✅ FIX: Seller state — pehle GSTIN se auto-derive karo, phir manual selection override kare
     let sellerStateEl = document.getElementById('settingSellerState');
@@ -9530,6 +9538,7 @@ function savePaymentSettings() {
     }
 }
 function saveSettings() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     // 🔒 FIX Bug2: parseInt(-5) = -5 (truthy) → || 40 kaam nahi karta; Math.max use karo
     let courier = parseInt(document.getElementById('defaultCourier').value);
     let freeMin = parseInt(document.getElementById('freeMin').value);
@@ -9603,6 +9612,7 @@ function showPassMsg(text, color) {
     setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 async function clearAllTestData() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     // ✅ FIX: confirm() → 2-step toast
     if(!window._clearTestDataConfirm) {
         window._clearTestDataConfirm = true;
@@ -9625,6 +9635,12 @@ async function clearAllTestData() {
     if(typeof _coupons !== 'undefined') _coupons = [];
     if(typeof _reviews !== 'undefined') _reviews = [];
     if(typeof _adminNotifs !== 'undefined') _adminNotifs = [];
+    // 🔧 FIX v41.2: Cart aur activeCoupon bhi reset karo
+    cart = []; activeCoupon = null;
+    saveCart(); updateCartCount(); renderCart();
+    // ✅ UI: coupon applied tag hide karo
+    let _ctag = document.getElementById('couponAppliedTag'); if(_ctag) _ctag.style.display='none';
+    let _crow = document.getElementById('couponInputRow'); if(_crow) _crow.style.display='flex';
 
     // 2. Stock zero karo (products + b2b)
     products.forEach(p => { p.stockQty = 0; p.inStock = false; });
@@ -9639,7 +9655,8 @@ async function clearAllTestData() {
         db.from('dealership_enquiries').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('sellers').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('distributors').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
-        db.from('coupons').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        // 🔧 FIX v41.2: coupons table ka PK 'code' hai, UUID 'id' nahi — neq('code','') use karo
+        db.from('coupons').delete().neq('code', ''),
     ];
 
     // 4. Settings mein se test keys delete karo
@@ -9839,6 +9856,7 @@ async function sellerUpdateStatus(id, status) {
 }
 
 async function sellerDelete(id) {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     // ✅ FIX: confirm() → 2-step toast
     let _selDelKey = '_delSeller_' + id;
     if(!window[_selDelKey]) {
@@ -9899,11 +9917,7 @@ const _sellerLoginGuard = (function() {
     };
 })();
 
-// Hash (reuse distHash pattern)
-async function sellerHash(str) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
+// 🔒 sellerHash removed — replaced by hashPassword/verifyPassword (salted SHA-256) [v41.2]
 
 function openSellerLogin() {
     document.getElementById('sellerLoginEmail').value = '';
@@ -10281,6 +10295,7 @@ function sendBRCM() {
     sendNext();
 }
 function sendBRCMCustom() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     let phone = document.getElementById("brcmCustomPhone").value.trim().replace(/\D/g,"");
     let msg = document.getElementById("brcmMessage").value.trim();
     if(!phone || phone.length < 10) { showToast('❌ Valid phone number daalen!', '#ff4444'); return; }
@@ -10298,6 +10313,7 @@ function saveOrderNote(id, note) {
 }
 
 function exportOrdersCSV() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     let parseTotal = t => { if(typeof t === 'number') return t; return parseInt(String(t).replace(/[₹,]/g,''))||0; };
     // Apply current filters
     let filterStatus = document.getElementById('orderStatusFilter')?.value || '';
@@ -12123,12 +12139,14 @@ function exportProductsOnly() {
     showToast('✅ Products JSON downloading — check Downloads folder!', '#1565c0');
 }
 function exportOrdersOnly() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'orders', data: { orders, bills } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
     _triggerDownload(blob, 'nexdrop_orders_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json');
     showToast('✅ Orders JSON downloading — check Downloads folder!', '#ff9800');
 }
 function exportUsersOnly() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     // 🔒 FIX H3: Password hashes ko export se strip karo
     let safeUsers = users.map(function(u) {
         var obj = Object.assign({}, u);
@@ -12145,6 +12163,7 @@ function exportUsersOnly() {
 // ---- 8. DATA IMPORT FUNCTIONS ----
 let _importParsed = null;
 function previewImport(event) {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     let file = event.target.files[0];
     _importParsed = null;
     let previewEl = document.getElementById('importPreview');
@@ -14213,6 +14232,7 @@ function khataClearSummary() {
     ['khataSumDebit','khataSumCredit','khataSumNet'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent='₹0'; });
 }
 window.khataAddCustomer = function() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     const name = (document.getElementById('khataNewName')||{}).value?.trim();
     const phone = (document.getElementById('khataNewPhone')||{}).value?.trim();
     if(!name) { showToast('❌ Customer naam likhein!','#c62828'); return; }
@@ -14231,6 +14251,7 @@ window.khataAddCustomer = function() {
     showToast('✅ Customer added!','#2c5a4a');
 };
 window.khataAddEntry = function() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     const sel = document.getElementById('khataCustomerSelect');
     const cid = sel?.value;
     if(!cid) { showToast('❌ Please select a customer first!','#c62828'); return; }
@@ -14251,8 +14272,10 @@ window.khataAddEntry = function() {
     showToast('✅ Entry save ho gayi!', type==='debit'?'#c62828':'#2e7d32');
 };
 window.khataDeleteEntry = function(cid, tsOrIdx) {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     // ✅ FIX: confirm() → 2-step toast
-    let _kEntKey = '_delKEntry_' + cid;
+    // 🔧 FIX v41.2: Per-entry key (was per-customer — caused wrong entry deletion if clicked rapidly)
+    let _kEntKey = '_delKEntry_' + cid + '_' + String(tsOrIdx);
     if(!window[_kEntKey]) {
         window[_kEntKey] = true;
         showToast('⚠️ Entry delete karna hai? Dobara click karein.', '#ff9800');
@@ -14277,6 +14300,7 @@ window.khataDeleteEntry = function(cid, tsOrIdx) {
     showToast('🗑️ Entry deleted!','#ff9800');
 };
 window.khataDeleteCustomer = function() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     const sel = document.getElementById('khataCustomerSelect');
     const cid = sel?.value;
     if(!cid) return;
@@ -15146,6 +15170,17 @@ function removeCoupon() {
 }
 function getCouponDiscount(subtotal) {
     if(!activeCoupon) return 0;
+    // 🔧 FIX v41.2: minOrder re-check — item remove hone par coupon silently invalid nahi rehna chahiye
+    if(activeCoupon.minOrder > 0 && subtotal < activeCoupon.minOrder) {
+        // Auto-remove coupon and notify
+        activeCoupon = null;
+        const tag = document.getElementById('couponAppliedTag');
+        const inputRow = document.getElementById('couponInputRow');
+        if(tag) tag.style.display = 'none';
+        if(inputRow) inputRow.style.display = 'flex';
+        showToast('⚠️ Coupon removed — minimum order requirement poori nahi hui!', '#ff9800');
+        return 0;
+    }
     if(activeCoupon.type === 'flat') return Math.min(activeCoupon.value, subtotal);
     if(activeCoupon.type === 'percent') return Math.round(subtotal * activeCoupon.value / 100);
     if(activeCoupon.type === 'free_shipping') return 0; // handled separately
@@ -17002,7 +17037,7 @@ function distAddToCart() {
     sel.value = ''; qtyEl.value = '';
     document.getElementById('distSelectedProductInfo').style.display = 'none';
     distRenderCart();
-    showToast('✅ ' + p.name + ' added!', '#2c5a4a');
+    showToast('✅ ' + esc(p.name) + ' added!', '#2c5a4a');
 }
 
 function distRenderCart() {
@@ -18265,7 +18300,7 @@ function catEditSave(tab, id) {
     else { saveProducts(); loadAdminProducts(); displayProducts(); }
     refreshStockDashboard();
     updateStats();
-    showToast('✅ ' + p.name + ' saved!', '#2c5a4a');
+    showToast('✅ ' + esc(p.name) + ' saved!', '#2c5a4a');
     // Re-render to reflect updated stock color
     catEditRenderProducts();
 }
@@ -19365,6 +19400,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 700);
 });
 
+console.log('✅ [v41.2] FINAL AUDIT — 26 fixes: [D-1] sellerHash removed; [U-1] Guest cart warning; [X-1] esc() 10x showToast; [K-1] Khata 4 guards; [K-2] _kEntKey per-entry; [C-1] coupon minOrder recheck; [S-1] 10 Settings guards (saveCompanySettings,savePaymentSettings,saveSettings,removeLogo,removeQR,clearAllTestData,exportCSV,exportOrders,exportUsers,previewImport); [S-2] sellerDelete guard; [S-3] sendBRCMCustom guard');
 console.log('✅ [v41.1] BUG FIX AUDIT: [M-1] doForgotPassword brute force guard added (_userLoginGuard.isLocked + recordFail); [M-2] name-based order match removed (6 locations — privacy leak fix); [M-3] _userLoginGuard declaration moved before usage (TDZ safety); [M-4] settings.adminUsername leak removed; [M-5] users[].password in-memory sync removed; [L-2] setInterval max retry ×4 (patchWL/OA/Notif/CH); [C-3] unsafe-eval removed from CSP');
 console.log('✅ [v41.0] SECURITY AUDIT FIXES: [C1] User login brute force (_userLoginGuard 5 fail→5min lockout); [C3] Seller portal sellerHash→hashPassword/verifyPassword (salted SHA-256); [H1] Carousel esc(p.name) XSS fix; [H3] exportUsersOnly password strip; [M1] safeSave error surfacing; [M2] adminDistWhatsApp helper (XSS-safe); [M5] SW registration improved (try /sw.js first)');
 console.log('✅ [v40.2] SETTINGS AUDIT: importMergeData+importReplaceData bills fix (safeSave→sbSaveBill); clearAllTestData: _wiBills/_pbBills/_khataCustomers/_khataEntries/savedItems reset added; dead _origLSRemove removed; WI/PB/khata UI refresh added post-reset');
@@ -19375,168 +19411,6 @@ console.log('✅ [PATCH v39.2] ZERO localStorage: rls_dismissed→sessionStorage
 console.log('✅ [PATCH v39.0] 4 Admin Distributor features: Sub-tabs, Payment Verification, Support Ticket Management, Credit Limit + Manual Ledger');
 console.log('✅ [PATCH v38.0] 5 User Panel features added: Wishlist, Cancel/Return, Notifications, Coupon History, Download Bill');
 </script>
-
-<!-- ═══════════════════════════════════════════════════ -->
-<!-- 🌐 TRANSLATOR FINAL — Google Translate Widget      -->
-<!-- Works on GitHub Pages, https://, any hosting       -->
-<!-- ═══════════════════════════════════════════════════ -->
-<style>
-/* Hide Google's ugly bar */
-.goog-te-banner-frame.skiptranslate { display:none!important; }
-.skiptranslate { display:none!important; }
-body { top:0!important; position:static!important; }
-#goog-te-spinner-pos { display:none!important; }
-
-/* Floating button */
-#langBtn {
-    position:fixed; bottom:80px; right:16px; z-index:99998;
-    width:54px; height:54px; border-radius:50%;
-    background:linear-gradient(135deg,#ff6b35,#f7931e);
-    color:#fff; border:none; cursor:pointer;
-    font-size:24px; box-shadow:0 4px 18px rgba(255,107,53,.5);
-    display:flex; align-items:center; justify-content:center;
-    -webkit-tap-highlight-color:transparent; user-select:none;
-    transition:transform .18s;
-}
-#langBtn:active { transform:scale(.93); }
-#langBtn .pulse {
-    position:absolute; width:100%; height:100%; border-radius:50%;
-    background:rgba(255,107,53,.3); animation:pulse 2s infinite; pointer-events:none;
-}
-@keyframes pulse{0%{transform:scale(1);opacity:.7}70%{transform:scale(1.6);opacity:0}100%{transform:scale(1.6);opacity:0}}
-
-/* Panel */
-#langPanel {
-    position:fixed; bottom:148px; right:14px; z-index:99999;
-    background:#fff; border-radius:20px;
-    box-shadow:0 8px 36px rgba(0,0,0,.18);
-    padding:16px 13px 12px; width:220px; display:none;
-    animation:slideUp .2s ease;
-}
-@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
-#langPanel h4 { margin:0 0 11px; font-size:.83rem; color:#2c5a4a; font-weight:700; text-align:center; }
-.lgrid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
-.lbtn {
-    border:1.5px solid #ececec; border-radius:11px; padding:8px 4px;
-    font-size:.72rem; font-weight:600; cursor:pointer; background:#fafafa;
-    color:#333; text-align:center; line-height:1.35; transition:all .15s;
-}
-.lbtn:active,.lbtn.on { background:#ff6b35; border-color:#ff6b35; color:#fff; }
-.lbtn .n { display:block; font-size:.9rem; }
-.lbtn .e { display:block; font-size:.6rem; opacity:.7; }
-.lreset {
-    width:100%; margin-top:9px; padding:8px; border:none; border-radius:10px;
-    background:#f5f0ea; color:#666; font-size:.73rem; font-weight:600; cursor:pointer;
-}
-.lreset:active { background:#ffe0d0; color:#ff6b35; }
-.lnote { font-size:.58rem; color:#c0b8b0; text-align:center; margin-top:6px; }
-</style>
-
-<!-- Hidden Google Translate element -->
-<div id="google_translate_element" style="display:none;visibility:hidden;"></div>
-
-<!-- Floating Button -->
-<button id="langBtn" onclick="LP.toggle()" aria-label="भाषा बदलें">
-    <span class="pulse"></span>🌐
-</button>
-
-<!-- Panel -->
-<div id="langPanel">
-    <h4>🌐 भाषा चुनें</h4>
-    <div class="lgrid">
-        <button class="lbtn" onclick="LP.set('hi')" data-l="hi"><span class="n">हिन्दी</span><span class="e">Hindi</span></button>
-        <button class="lbtn" onclick="LP.set('bn')" data-l="bn"><span class="n">বাংলা</span><span class="e">Bengali</span></button>
-        <button class="lbtn" onclick="LP.set('te')" data-l="te"><span class="n">తెలుగు</span><span class="e">Telugu</span></button>
-        <button class="lbtn" onclick="LP.set('mr')" data-l="mr"><span class="n">मराठी</span><span class="e">Marathi</span></button>
-        <button class="lbtn" onclick="LP.set('ta')" data-l="ta"><span class="n">தமிழ்</span><span class="e">Tamil</span></button>
-        <button class="lbtn" onclick="LP.set('gu')" data-l="gu"><span class="n">ગુજરાતી</span><span class="e">Gujarati</span></button>
-        <button class="lbtn" onclick="LP.set('kn')" data-l="kn"><span class="n">ಕನ್ನಡ</span><span class="e">Kannada</span></button>
-        <button class="lbtn" onclick="LP.set('pa')" data-l="pa"><span class="n">ਪੰਜਾਬੀ</span><span class="e">Punjabi</span></button>
-    </div>
-    <button class="lreset" onclick="LP.reset()">↩ English (Default)</button>
-    <div class="lnote">Google Translate द्वारा</div>
-</div>
-
-<!-- Google Translate Script -->
-<script type="text/javascript">
-function googleTranslateElementInit() {
-    new google.translate.TranslateElement({
-        pageLanguage: 'en',
-        includedLanguages: 'hi,bn,te,mr,ta,gu,kn,pa',
-        autoDisplay: false,
-        multilanguagePage: false
-    }, 'google_translate_element');
-}
-</script>
-<script src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
-
-<script>
-var LP = (function(){
-    var open  = false;
-    var names = {hi:'हिन्दी',bn:'বাংলা',te:'తెలుగు',mr:'मराठी',ta:'தமிழ்',gu:'ગુજરાતી',kn:'ಕನ್ನಡ',pa:'ਪੰਜਾਬੀ'};
-
-    function toggle(){
-        open = !open;
-        document.getElementById('langPanel').style.display = open ? 'block' : 'none';
-    }
-
-    function doGoogleTranslate(lang){
-        // Method: trigger the hidden Google Translate combo select
-        var tries = 0;
-        var iv = setInterval(function(){
-            tries++;
-            if(tries > 40){ clearInterval(iv); return; }
-            var combo = document.querySelector('.goog-te-combo');
-            if(combo){
-                clearInterval(iv);
-                combo.value = lang;
-                // Fire both change events — required by Google's widget
-                combo.dispatchEvent(new Event('change'));
-                if(typeof combo.onchange === 'function') combo.onchange();
-            }
-        }, 150);
-    }
-
-    function set(lang){
-        // Mark active
-        document.querySelectorAll('.lbtn').forEach(function(b){
-            b.classList.toggle('on', b.getAttribute('data-l') === lang);
-        });
-        document.getElementById('langPanel').style.display = 'none';
-        open = false;
-
-        doGoogleTranslate(lang);
-
-        if(typeof showToast === 'function'){
-            setTimeout(function(){
-                showToast('🌐 ' + (names[lang]||lang) + ' mein translate ho raha hai…', '#2c5a4a');
-            }, 500);
-        }
-    }
-
-    function reset(){
-        document.querySelectorAll('.lbtn').forEach(function(b){ b.classList.remove('on'); });
-        document.getElementById('langPanel').style.display = 'none';
-        open = false;
-        doGoogleTranslate('en');
-        if(typeof showToast === 'function') showToast('↩ English restore ho gaya', '#2c5a4a');
-    }
-
-    // Close on outside click
-    document.addEventListener('click', function(e){
-        if(!open) return;
-        if(!document.getElementById('langBtn').contains(e.target) &&
-           !document.getElementById('langPanel').contains(e.target)){
-            document.getElementById('langPanel').style.display = 'none';
-            open = false;
-        }
-    });
-
-    return { toggle:toggle, set:set, reset:reset };
-})();
-console.log('✅ [TRANSLATOR FINAL] Google Translate Widget — GitHub Pages ready');
-</script>
-<!-- ═══════════════════ END TRANSLATOR FINAL ════════════════════ -->
-
 </body>
 </html>
+
