@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.9 applied | v41.4 BUG FIX AUDIT: [C-1] uploadB2BPhoto MIME validation added; [C-2] uploadExtraPhoto MIME+onerror+validCount fixed; [M-1] sbSaveBill order_id coercion consistent; [M-2] downloadOrderText textarea XSS fixed (innerHTML embed removed); [L-1] sbSaveProduct rating/rating_count in row; [L-4] settings.freeMin null fallback; [S-1] distLogin legacy distHash+sha256 dual-format support+auto-migrate; [S-2] distRegister hashPassword+email validation; [S-3] Seller session full Supabase restore | v41.3 FIXES below -->
+<!-- 🔒 SECURITY PATCH v2.9 applied | v42.0 MAJOR UPDATE: [S-1] Seller system completely removed; [S-2] User session sessionStorage→Supabase; [S-3] Company State renamed (GST ke liye); [D-1] Dashboard functions all Supabase-backed; [D-2] Settings functions verified; [D-3] localStorage completely removed | v41.4 BUG FIX AUDIT: [C-1] uploadB2BPhoto MIME validation added; [C-2] uploadExtraPhoto MIME+onerror+validCount fixed; [M-1] sbSaveBill order_id coercion consistent; [M-2] downloadOrderText textarea XSS fixed (innerHTML embed removed); [L-1] sbSaveProduct rating/rating_count in row; [L-4] settings.freeMin null fallback; [S-1] distLogin legacy distHash+sha256 dual-format support+auto-migrate; [S-2] distRegister hashPassword+email validation; [S-3] Seller session full Supabase restore | v41.3 FIXES below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -249,11 +249,8 @@ function _sbRemove(key) {
     } catch(e) {}
 }
 
-// ---- localStorage INTERCEPT (DISABLED — no localStorage in v37) ----
-// Sab data in-memory arrays mein hai, Supabase se sync hota hai directly
-const _origLSSet    = function() {};  // no-op
-const _origLSGet    = function() { return null; };  // no-op
-const _origLSRemove = function() {};  // no-op
+// ✅ v42: localStorage fully disabled — Supabase-only storage
+// All data is in Supabase + in-memory arrays. No localStorage anywhere.
 
 // ✅ Cold-start hydration: page load pe Supabase ki settings table se
 // sab keys localStorage mein populate karo — isse offline/stale data problem solve hoti hai
@@ -411,7 +408,7 @@ async function sbSaveProduct(p) {
             row.image_value = '🌾'; row.image_type = 'emoji';
         }
         if(p.id && typeof p.id === 'number' && p.id > 0) {
-            const { data: existing } = await db.from('products').select('id').eq('id', p.id).single();
+            const { data: existing } = await db.from('products').select('id').eq('id', p.id).maybeSingle(); // ✅ FIX: .single()→.maybeSingle() — product missing pe crash prevent
             if(existing) {
                 await db.from('products').update(row).eq('id', p.id);
             } else {
@@ -1002,16 +999,8 @@ async function initSupabase() {
     if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay();
     renderHomepageReviews(); // Page load par approved reviews dikhao
 
-    // ✅ FIX: Page refresh ke baad user session sessionStorage se restore karo
-    try {
-        const _savedUser = sessionStorage.getItem('nexdrop_current_user');
-        if(_savedUser && !currentUser) {
-            currentUser = JSON.parse(_savedUser);
-            sbLoadUserCart();
-            sbLoadSavedItems();
-            console.log('✅ User session restored after refresh:', currentUser.email);
-        }
-    } catch(e) { console.log('User session restore failed:', e.message); }
+    // ✅ v42: User session Supabase se restore karo (sessionStorage session data removed)
+    await _sbRestoreUserSession();
 
     console.log('✅ Supabase data loaded!');
 }
@@ -1695,6 +1684,16 @@ function _stripPasswords(usersArr) {
     .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; justify-content: center; align-items: center; padding: 1rem; }
     .modal.active { display: flex; }
     .modal-content { background: white; padding: 1.5rem; border-radius: 24px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; }
+    /* 🔑 LOGIN FULL PAGE MODE */
+    #userModal.login-page { background: linear-gradient(135deg,#f5f0ea 0%,#e8f5e9 100%); padding: 0; align-items: flex-start; }
+    #userModal.login-page .modal-content { max-width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; padding: 0; overflow-y: auto; background: transparent; display: flex; flex-direction: column; position: relative; }
+    .login-page-inner { background: white; border-radius: 20px; margin: 1.5rem auto; padding: 1.8rem 1.5rem; width: 100%; max-width: 420px; box-shadow: 0 8px 32px rgba(44,90,74,0.13); }
+    .login-page-header { text-align: center; padding: 2rem 1rem 0.5rem; }
+    .login-page-header .brand-logo { font-size: 2.2rem; margin-bottom: 0.3rem; }
+    .login-page-header h2 { color: #2c5a4a; font-size: 1.3rem; margin: 0 0 0.2rem; }
+    .login-page-header p { color: #888; font-size: 0.82rem; margin: 0 0 1rem; }
+    .login-page-back { position: absolute; top: 1rem; left: 1rem; background: none; border: none; color: #2c5a4a; font-size: 1.1rem; cursor: pointer; font-weight: 700; padding: 0.4rem 0.8rem; border-radius: 10px; background: rgba(44,90,74,0.08); width: auto !important; margin: 0 !important; }
+    #userModal.login-page .close-btn-inline { display: none; }
     .modal-content input, .modal-content textarea { width: 100%; padding: 0.7rem; margin: 0.4rem 0; border: 1px solid #e0d5c8; border-radius: 12px; font-size: 0.85rem; font-family: inherit; }
     .modal-content button { width: 100%; padding: 0.7rem; background: #2c5a4a; color: white; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; margin-top: 0.6rem; transition: all 0.3s; font-family: inherit; }
     .modal-content button:hover { background: #1e3f34; }
@@ -2152,7 +2151,6 @@ body.dark-mode .nav-links { background: #121a18 !important; }
             <a href="#" onclick="navGo(scrollToContact); return false;">Contact</a>
             <a href="#" onclick="openDealershipModal(); closeNav(); return false;" style="color:#c49a6c;font-weight:700;">🤝 Dealership / Distributor</a>
             <a href="#" onclick="openDistributorLogin(); closeNav(); return false;" style="color:#fff;font-weight:700;background:linear-gradient(135deg,#2c5a4a,#c49a6c);padding:4px 12px;border-radius:20px;">🏭 Distributor Login</a>
-            <a href="#" onclick="openSellerLogin(); closeNav(); return false;" style="color:#fff;font-weight:700;background:linear-gradient(135deg,#1a4a8a,#e91e63);padding:4px 12px;border-radius:20px;">🏪 Seller Login</a>
             <a href="https://wa.me/919006606697?text=Hi" target="_blank"><i class="fab fa-whatsapp" style="color:#25D366;margin-right:4px;"></i> WhatsApp</a>
             <div class="cart-icon" onclick="toggleCart(); closeNav();">🛒<span class="cart-count" id="cartCount">0</span></div>
         </div>
@@ -2175,6 +2173,8 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <button onclick="sliderNext()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.45);color:white;border:none;width:40px;height:40px;border-radius:50%;font-size:1.3rem;cursor:pointer;z-index:10;display:flex;align-items:center;justify-content:center;">&#8250;</button>
     <!-- Dots -->
     <div id="sliderDots" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:7px;z-index:10;"></div>
+    <!-- ✅ FIX: heroBadgeFree — JS free delivery amount update karta hai yahan -->
+    <div id="heroBadgeFree" style="position:absolute;top:12px;left:12px;background:rgba(44,110,44,0.88);color:white;font-size:0.68rem;font-weight:700;padding:0.25rem 0.65rem;border-radius:20px;z-index:10;backdrop-filter:blur(4px);pointer-events:none;">🚚 Free Delivery above ₹499</div>
 </div>
 <style>
 .slider-slide { min-width:100%;position:relative;flex-shrink:0; }
@@ -2284,25 +2284,14 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <!-- ✅ v36.21: Tea/Makhana + all other retail category tabs rendered dynamically at runtime -->
     </div>
 
-    <!-- Retail Tea Heading -->
-    <div id="retailTeaHeading" style="display:none;margin-bottom:0.8rem;">
-        <div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;border-left:4px solid #1565c0;">
-            <span style="font-size:1.3rem;">☕</span>
-            <span style="font-weight:700;color:#1565c0;font-size:0.95rem;">Retail Tea</span>
-        </div>
-    </div>
-    <div class="product-grid" id="retailTeaGrid" style="margin-bottom:2rem;"></div>
+    <!-- ✅ v42: Retail Dynamic Grids — fully generated by displayProducts() for ANY category -->
+    <div id="retailDynamicGrids"></div>
 
-    <!-- Retail Makhana Heading -->
-    <div id="retailMakhanaHeading" style="display:none;margin-bottom:0.8rem;">
-        <div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:linear-gradient(135deg,#f3e5f5,#e1bee7);border-radius:12px;border-left:4px solid #7b1fa2;">
-            <span style="font-size:1.3rem;">🌾</span>
-            <span style="font-weight:700;color:#7b1fa2;font-size:0.95rem;">Retail Makhana</span>
-        </div>
-    </div>
-    <div class="product-grid" id="retailMakhanaGrid" style="margin-bottom:2rem;"></div>
-
-    <!-- Legacy single grid (hidden, kept for compatibility) -->
+    <!-- Legacy static grids (hidden, kept for JS compatibility) -->
+    <div id="retailTeaHeading" style="display:none;"></div>
+    <div class="product-grid" id="retailTeaGrid" style="display:none;"></div>
+    <div id="retailMakhanaHeading" style="display:none;"></div>
+    <div class="product-grid" id="retailMakhanaGrid" style="display:none;"></div>
     <div class="product-grid" id="productGrid" style="display:none;"></div>
 </div>
 
@@ -2559,7 +2548,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <div class="footer-col"><h4>Nexdrop Mart</h4><p>Premium FMCG & Grocery Marketplace since 2024</p><div class="social-links"><a href="#"><i class="fab fa-instagram"></i></a><a href="#"><i class="fab fa-facebook"></i></a><a href="#"><i class="fab fa-twitter"></i></a></div></div>
         <div class="footer-col"><h4>Quick Links</h4><p><button onclick="scrollToTop()" style="background:none;border:none;color:#b8a98c;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Home</button></p><p><button onclick="scrollToProducts()" style="background:none;border:none;color:#b8a98c;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Shop</button></p><p><button onclick="scrollToB2B()" style="background:none;border:none;color:#b8a98c;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Wholesale</button></p><p><button onclick="scrollToAbout()" style="background:none;border:none;color:#b8a98c;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">About Us</button></p><p><button onclick="scrollToContact()" style="background:none;border:none;color:#b8a98c;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Contact</button></p><p><button onclick="openDealershipModal()" style="background:none;border:none;color:#c49a6c;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;font-weight:600;">🤝 Distributor Enquiry</button></p></div>
         <div class="footer-col"><h4>Policies</h4><p><button onclick="openPolicy('refund')" style="background:none;border:none;color:#c8b89a;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Return &amp; Refund Policy</button></p><p><button onclick="openPolicy('privacy')" style="background:none;border:none;color:#c8b89a;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Privacy Policy</button></p><p><button onclick="openPolicy('terms')" style="background:none;border:none;color:#c8b89a;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Terms &amp; Conditions</button></p><p><button onclick="openPolicy('shipping')" style="background:none;border:none;color:#c8b89a;cursor:pointer;font-size:0.8rem;padding:0;text-align:left;line-height:1.8;">Shipping Policy</button></p></div>
-        <div class="footer-col"><h4>Contact Info</h4><p>Nexdrop Solutions Pvt Ltd</p><p>Mission Compound Mahadeva</p><p>Opposite Tapti Verma House</p><p>Dist Siwan, Bihar - 841226</p><p>📞 +91 9006606697</p><p>✉️ info&#64;nexdropmart.com</p><p>🌐 www.nexdropmart.com</p></div>
+        <div class="footer-col"><h4>Contact Info</h4><p>Nexdrop Solutions Pvt Ltd</p><p>Mission Compound Mahadeva</p><p>Opposite Tapti Verma House</p><p>Dist Siwan, Bihar - 841226</p><p>📞 <a href="tel:+919006606697" style="color:#c49a6c;text-decoration:none;">+91 9006606697</a></p><p>✉️ <a href="mailto:info@nexdropmart.com" style="color:#c49a6c;text-decoration:none;">info@nexdropmart.com</a></p><p>🌐 <a href="https://www.nexdropmart.com" target="_blank" style="color:#c49a6c;text-decoration:none;">www.nexdropmart.com</a></p></div>
     </div>
     <div class="footer-bottom"><p>© 2024 Nexdrop Solutions Pvt Ltd | All Rights Reserved</p></div>
 </div>
@@ -2698,6 +2687,15 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 
 <!-- User Panel -->
 <div id="userModal" class="modal"><div class="modal-content">
+  <!-- Login Page Header (only shown in login-page mode) -->
+  <div class="login-page-header" id="loginPageHeader" style="display:none;">
+    <div class="brand-logo">🍃</div>
+    <h2>Nexdrop Mart</h2>
+    <p>Login karein ya naya account banayein</p>
+  </div>
+  <button class="login-page-back" id="loginPageBackBtn" style="display:none;" onclick="closeUserPanel()">← Back to Store</button>
+  <div id="loginPageInner" style="padding:0;">
+
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
     <h3>&#9749; My Account</h3>
     <button class="close-btn-inline" onclick="closeUserPanel()">&#10005;</button>
@@ -2901,6 +2899,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   </div>
 
   <button onclick="closeUserPanel()" style="background:#f5f0ea;color:#2c5a4a;margin-top:0.6rem;">Close</button>
+  </div><!-- /loginPageInner -->
 </div></div>
 
 <!-- Edit Profile Modal -->
@@ -3046,97 +3045,11 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   </div>
 </div>
 
-<!-- ===================== SELLER LOGIN MODAL ===================== -->
-<div id="sellerLoginModal" class="modal">
-  <div class="modal-content" style="max-width:380px;">
-    <!-- Main Login Form -->
-    <div id="sellerLoginMainForm">
-      <h3 style="color:#1a4a8a;margin-bottom:0.3rem;">🏪 Seller Portal</h3>
-      <p style="font-size:0.78rem;color:#888;margin-bottom:1rem;">Login to access your seller dashboard.</p>
-      <input type="email" id="sellerLoginEmail" placeholder="Registered Email *" style="margin-bottom:0.6rem;">
-      <input type="password" id="sellerLoginPass" placeholder="Password *" style="margin-bottom:0.5rem;">
-      <div style="text-align:right;margin-bottom:0.8rem;">
-        <span onclick="showSellerForgot()" style="font-size:0.78rem;color:#1a4a8a;cursor:pointer;text-decoration:underline;">🔑 Forgot Password?</span>
-      </div>
-      <button onclick="sellerLogin()" style="background:linear-gradient(135deg,#1a4a8a,#e91e63);color:white;width:100%;padding:0.75rem;border:none;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:0.4rem;">🔓 Login</button>
-      <button onclick="openSellerSignup()" style="background:#f0f4ff;color:#1a4a8a;width:100%;padding:0.6rem;border:1px solid #c0caff;border-radius:12px;font-size:0.85rem;cursor:pointer;font-weight:600;margin-bottom:0.4rem;">📝 New Seller? Register Here</button>
-      <button onclick="closeSellerLogin()" style="background:#f5f0ea;color:#666;width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:12px;font-size:0.82rem;cursor:pointer;">Cancel</button>
-    </div>
-    <!-- Forgot Password Form -->
-    <div id="sellerForgotPassForm" style="display:none;">
-      <p style="font-size:0.85rem;color:#1a4a8a;font-weight:600;margin-bottom:0.3rem;">🔑 Seller Password Reset</p>
-      <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Registered Email aur Phone number se verify karein.</p>
-      <input type="email" id="sellerFpEmail" placeholder="Registered Email Address *" style="margin-bottom:0.5rem;">
-      <input type="tel" id="sellerFpPhone" placeholder="Registered Mobile Number (10 digits) *" style="margin-bottom:0.5rem;" maxlength="10">
-      <input type="password" id="sellerFpNewPass" placeholder="New Password (min 6 chars) *" style="margin-bottom:0.5rem;">
-      <input type="password" id="sellerFpConfPass" placeholder="Confirm New Password *" style="margin-bottom:0.5rem;">
-      <div id="sellerFpMsg" style="font-size:0.78rem;min-height:1.2rem;margin-bottom:0.5rem;text-align:center;padding:0.3rem;border-radius:6px;"></div>
-      <button onclick="doSellerForgotPassword()" style="background:linear-gradient(135deg,#1a4a8a,#e91e63);color:white;width:100%;padding:0.7rem;border:none;border-radius:12px;font-weight:700;cursor:pointer;margin-bottom:0.4rem;">✅ Reset Password</button>
-      <button onclick="hideSellerForgot()" style="background:#f0f4ff;color:#1a4a8a;width:100%;padding:0.5rem;border:1px solid #c0caff;border-radius:12px;font-size:0.85rem;cursor:pointer;">← Back to Login</button>
-    </div>
-  </div>
-</div>
 
-<!-- ===================== SELLER SIGNUP MODAL ===================== -->
-<div id="sellerSignupModal" class="modal">
-  <div class="modal-content" style="max-width:420px;">
-    <h3 style="color:#1a4a8a;margin-bottom:0.3rem;">📝 Seller Registration</h3>
-    <p style="font-size:0.78rem;color:#888;margin-bottom:1rem;">Create your seller account. Admin approval required before login.</p>
-    <input type="text" id="sellerRegShop" placeholder="Shop / Business Name *">
-    <input type="text" id="sellerRegOwner" placeholder="Owner Full Name *">
-    <input type="tel" id="sellerRegPhone" placeholder="Mobile Number *">
-    <input type="email" id="sellerRegEmail" placeholder="Email Address *">
-    <input type="text" id="sellerRegCity" placeholder="City *">
-    <input type="text" id="sellerRegGSTIN" placeholder="GSTIN (optional)">
-    <input type="password" id="sellerRegPass" placeholder="Create Password (min 6 chars) *">
-    <input type="password" id="sellerRegPass2" placeholder="Confirm Password *">
-    <button onclick="sellerRegister()" style="background:linear-gradient(135deg,#1a4a8a,#e91e63);color:white;width:100%;padding:0.75rem;border:none;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;margin-bottom:0.4rem;">🚀 Register</button>
-    <button onclick="closeSellerSignup(); openSellerLogin();" style="background:#f0f4ff;color:#1a4a8a;width:100%;padding:0.5rem;border:1px solid #c0caff;border-radius:12px;font-size:0.82rem;cursor:pointer;margin-bottom:0.3rem;">Already registered? Login</button>
-    <button onclick="closeSellerSignup()" style="background:#f5f0ea;color:#666;width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:12px;font-size:0.82rem;cursor:pointer;">Cancel</button>
-  </div>
-</div>
 
-<!-- ===================== SELLER DASHBOARD ===================== -->
-<div id="sellerDashboard" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#f0f4ff;z-index:3000;overflow-y:auto;">
-  <!-- Header -->
-  <div style="background:linear-gradient(135deg,#1a4a8a,#0d2a5a);padding:0.8rem 1rem;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;">
-    <div>
-      <div style="color:#e91e63;font-size:0.72rem;font-weight:700;letter-spacing:1px;">NEXDROP MART</div>
-      <div style="color:white;font-weight:700;font-size:1rem;">🏪 Seller Portal</div>
-    </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;">
-      <span id="sellerDashWelcome" style="color:#c0caff;font-size:0.78rem;font-weight:600;"></span>
-      <button onclick="sellerLogout()" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);padding:5px 12px;border-radius:20px;font-size:0.75rem;cursor:pointer;">🚪 Logout</button>
-    </div>
-  </div>
 
-  <!-- Status Card -->
-  <div style="margin:1rem;background:white;border-radius:14px;padding:1rem;box-shadow:0 2px 8px rgba(0,0,0,0.07);">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <div>
-        <div style="font-weight:700;font-size:1rem;color:#1a4a8a;" id="sellerDashShop">Shop Name</div>
-        <div style="font-size:0.8rem;color:#888;" id="sellerDashOwner">Owner</div>
-        <div style="font-size:0.75rem;color:#aaa;margin-top:2px;" id="sellerDashCity"></div>
-      </div>
-      <span id="sellerDashStatus" style="font-size:0.72rem;padding:4px 12px;border-radius:20px;font-weight:700;background:#fff3cd;color:#e67e22;">PENDING</span>
-    </div>
-    <div id="sellerPendingMsg" style="display:none;margin-top:0.8rem;padding:0.6rem;background:#fff8e1;border-radius:8px;font-size:0.8rem;color:#e67e22;text-align:center;">
-      ⏳ Your account is pending admin approval. Contact: <strong>+91 9006606697</strong>
-    </div>
-  </div>
 
-  <!-- Profile Details -->
-  <div style="margin:0 1rem 1rem;background:white;border-radius:14px;padding:1rem;box-shadow:0 2px 8px rgba(0,0,0,0.07);">
-    <div style="font-weight:700;color:#1a4a8a;margin-bottom:0.7rem;">📋 My Profile</div>
-    <div id="sellerDashProfile" style="font-size:0.83rem;color:#555;line-height:2;"></div>
-  </div>
 
-  <!-- Contact Admin -->
-  <div style="margin:0 1rem 2rem;background:white;border-radius:14px;padding:1rem;box-shadow:0 2px 8px rgba(0,0,0,0.07);text-align:center;">
-    <div style="font-size:0.85rem;color:#555;margin-bottom:0.8rem;">Need help? Contact Nexdrop support</div>
-    <a href="#" onclick="sellerContactAdmin(); return false;" style="display:inline-block;background:linear-gradient(135deg,#25D366,#128C7E);color:white;padding:0.6rem 1.4rem;border-radius:20px;font-weight:700;font-size:0.85rem;text-decoration:none;">💬 WhatsApp Support</a>
-  </div>
-</div>
 
 <!-- ===================== DISTRIBUTOR DASHBOARD ===================== -->
 <div id="distributorDashboard" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#f5f0ea;z-index:3000;overflow-y:auto;">
@@ -3670,7 +3583,11 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <tr>
           <!-- LEFT: Seller Info -->
           <td style="width:52%;vertical-align:top;border:1px solid #555;padding:0.35rem 0.45rem;border-right:none;">
+            <!-- ✅ FIX: billPrintLogoWrap added — JS logo inject karta hai yahan -->
+            <div id="billPrintLogoWrap" style="width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;margin-bottom:0.3rem;background:linear-gradient(135deg,#2c6e2c,#c49a6c);">🌾</div>
             <div id="billPrintCompanyName" style="font-weight:700;font-size:0.8rem;">Nexdrop Mart</div>
+            <!-- ✅ FIX: billPrintCompanySubName added — JS subtitle inject karta hai yahan -->
+            <div id="billPrintCompanySubName" style="font-size:0.6rem;color:#555;margin-bottom:2px;"></div>
             <div id="billPrintCompanyAddr" style="color:#222;line-height:1.65;margin-top:2px;font-size:0.63rem;">
               Mission Compound Mahadewa, Opp. Tapti Verma House,<br>
               Dist. Siwan, Bihar – 841226<br>
@@ -4091,9 +4008,9 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     Enable RLS policies on <strong>products, orders, users, bills, coupons, settings</strong> tables in your Supabase dashboard — otherwise anyone can read/write your data.<br>
     <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" style="color:#1565c0;font-weight:600;">📖 Supabase RLS Guide →</a>
   </div>
-  <button onclick="document.getElementById('rlsWarningBanner').style.display='none';localStorage.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
+  <button onclick="document.getElementById('rlsWarningBanner').style.display='none';sessionStorage.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
 </div>
-<script>if(localStorage.getItem('rls_dismissed')==='1'){var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none';}</script>
+<script>if(sessionStorage.getItem('rls_dismissed')==='1'){var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none';}</script>
 
 <div class="admin-stats">
 <div class="stat-card"><div class="stat-number" id="statProducts">0</div><div>Products</div></div>
@@ -4117,42 +4034,9 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 </div>
 <!-- ✅ v31: Custom category stock cards — dynamically rendered -->
 <div id="statCustomCatCards" style="display:flex;flex-wrap:wrap;gap:0.5rem;margin:0.5rem 0;"></div>
-<div class="admin-tabs"><div class="admin-tab" onclick="switchTab('coupons')" style="background:linear-gradient(135deg,#1a3a5a,#e91e63);color:white;">🎟️ Coupons</div><div class="admin-tab" onclick="switchTab('analytics')" style="background:linear-gradient(135deg,#1a2a5a,#3f51b5);color:white;">📊 Analytics</div><div class="admin-tab" onclick="switchTab('reviews')" style="background:linear-gradient(135deg,#5a3a1a,#ff9800);color:white;">⭐ Reviews</div><div class="admin-tab" onclick="switchTab('sellers')" style="background:linear-gradient(135deg,#1a4a2a,#43a047);color:white;">🏪 Sellers <span id="sellerPendingBadge" style="display:none;background:red;color:white;border-radius:50%;font-size:0.65rem;padding:1px 5px;margin-left:4px;">0</span></div><div class="admin-tab" onclick="switchTab('products')">📦 Products</div><div class="admin-tab" onclick="switchTab('orders')">📋 Orders</div><div class="admin-tab" onclick="switchTab('stock')">🏪 Stock</div><div class="admin-tab" onclick="switchTab('users')">👥 Users</div><div class="admin-tab" onclick="switchTab('bulk')">🏭 Enquiries</div><div class="admin-tab" onclick="switchTab('dealership')" style="background:linear-gradient(135deg,#1a3a5a,#c49a6c);color:white;">🤝 Dealership</div><div class="admin-tab" onclick="switchTab('distributors')" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;">🏭 Distributors <span id="distPendingBadge" style="display:none;background:red;color:white;border-radius:50%;font-size:0.65rem;padding:1px 5px;margin-left:4px;">0</span></div><div class="admin-tab" onclick="switchTab('b2b')">📦 B2B</div><div class="admin-tab" onclick="switchTab('wholesale-invoice')" style="background:linear-gradient(135deg,#1a4a3a,#c49a6c);color:white;">🧾 Wholesale Invoice</div><div class="admin-tab" onclick="switchTab('khata')" style="background:linear-gradient(135deg,#1a3a5a,#e53935);color:white;">📒 Khata (Debit/Credit)</div><div class="admin-tab" onclick="switchTab('purchase')" style="background:linear-gradient(135deg,#4a1a3a,#9c27b0);color:white;">🛒 Purchase Bills</div><div class="admin-tab" onclick="switchTab('brcm')" style="background:linear-gradient(135deg,#1a5a4a,#25D366);color:white;">📢 Broadcast</div><div class="admin-tab" onclick="switchTab('gst')" style="background:linear-gradient(135deg,#3a1a5a,#7b1fa2);color:white;">💰 GST</div><div class="admin-tab" onclick="switchTab('reports')" style="background:linear-gradient(135deg,#1a3a6a,#2196f3);color:white;">📊 Reports</div><div class="admin-tab" onclick="switchTab('settings')">⚙️ Settings</div><div class="admin-tab" onclick="adminGoHome()" style="background:linear-gradient(135deg,#c49a6c,#a07840);color:white;">🏠 Home Page</div><div class="admin-tab" onclick="openSliderManager()" style="background:linear-gradient(135deg,#1a5a4a,#c49a6c);color:white;">🖼️ Slider Images</div></div>
+<div class="admin-tabs"><div class="admin-tab" onclick="switchTab('coupons')" style="background:linear-gradient(135deg,#1a3a5a,#e91e63);color:white;">🎟️ Coupons</div><div class="admin-tab" onclick="switchTab('analytics')" style="background:linear-gradient(135deg,#1a2a5a,#3f51b5);color:white;">📊 Analytics</div><div class="admin-tab" onclick="switchTab('reviews')" style="background:linear-gradient(135deg,#5a3a1a,#ff9800);color:white;">⭐ Reviews</div><div class="admin-tab" onclick="switchTab('products')">📦 Products</div><div class="admin-tab" onclick="switchTab('orders')">📋 Orders</div><div class="admin-tab" onclick="switchTab('stock')">🏪 Stock</div><div class="admin-tab" onclick="switchTab('users')">👥 Users</div><div class="admin-tab" onclick="switchTab('bulk')">🏭 Enquiries</div><div class="admin-tab" onclick="switchTab('dealership')" style="background:linear-gradient(135deg,#1a3a5a,#c49a6c);color:white;">🤝 Dealership</div><div class="admin-tab" onclick="switchTab('distributors')" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;">🏭 Distributors <span id="distPendingBadge" style="display:none;background:red;color:white;border-radius:50%;font-size:0.65rem;padding:1px 5px;margin-left:4px;">0</span></div><div class="admin-tab" onclick="switchTab('b2b')">📦 B2B</div><div class="admin-tab" onclick="switchTab('wholesale-invoice')" style="background:linear-gradient(135deg,#1a4a3a,#c49a6c);color:white;">🧾 Wholesale Invoice</div><div class="admin-tab" onclick="switchTab('khata')" style="background:linear-gradient(135deg,#1a3a5a,#e53935);color:white;">📒 Khata (Debit/Credit)</div><div class="admin-tab" onclick="switchTab('purchase')" style="background:linear-gradient(135deg,#4a1a3a,#9c27b0);color:white;">🛒 Purchase Bills</div><div class="admin-tab" onclick="switchTab('brcm')" style="background:linear-gradient(135deg,#1a5a4a,#25D366);color:white;">📢 Broadcast</div><div class="admin-tab" onclick="switchTab('gst')" style="background:linear-gradient(135deg,#3a1a5a,#7b1fa2);color:white;">💰 GST</div><div class="admin-tab" onclick="switchTab('reports')" style="background:linear-gradient(135deg,#1a3a6a,#2196f3);color:white;">📊 Reports</div><div class="admin-tab" onclick="switchTab('settings')">⚙️ Settings</div><div class="admin-tab" onclick="adminGoHome()" style="background:linear-gradient(135deg,#c49a6c,#a07840);color:white;">🏠 Home Page</div><div class="admin-tab" onclick="openSliderManager()" style="background:linear-gradient(135deg,#1a5a4a,#c49a6c);color:white;">🖼️ Slider Images</div></div>
 
-<!-- ✅ Sellers Tab -->
-<div id="tab-sellers" class="tab-content">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.8rem;">
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-      <button class="btn-small" onclick="filterSellerStatus('all')" id="sfBtn_all" style="background:#2c5a4a;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">All</button>
-      <button class="btn-small" onclick="filterSellerStatus('pending')" id="sfBtn_pending" style="background:#f59e0b;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">⏳ Pending</button>
-      <button class="btn-small" onclick="filterSellerStatus('approved')" id="sfBtn_approved" style="background:#16a34a;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">✅ Approved</button>
-      <button class="btn-small" onclick="filterSellerStatus('rejected')" id="sfBtn_rejected" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">✗ Rejected</button>
-      <button class="btn-small" onclick="filterSellerStatus('banned')" id="sfBtn_banned" style="background:#7c3aed;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">🚫 Banned</button>
-    </div>
-    <input id="sellerSearchInput" placeholder="🔍 Search sellers..." oninput="renderSellersTable()" style="padding:6px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;min-width:180px;">
-  </div>
-  <div class="admin-table-wrapper">
-    <table class="admin-table">
-      <thead><tr>
-        <th>#</th><th>Shop Name</th><th>Owner</th><th>Phone</th><th>City</th><th>GSTIN</th><th>Products</th><th>Status</th><th>Joined</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="adminSellersList"></tbody>
-    </table>
-  </div>
-  <!-- Add Seller Modal -->
-  <div style="margin-top:1.2rem;background:#f9f5f0;border-radius:12px;padding:1rem;border:1px solid #e0d5c5;">
-    <div style="font-weight:700;margin-bottom:0.8rem;font-size:0.9rem;">➕ Add New Seller</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0.6rem;">
-      <input id="ns_shop" placeholder="Shop Name *" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_owner" placeholder="Owner Name *" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_phone" placeholder="Phone *" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_city" placeholder="City" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_gstin" placeholder="GSTIN" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_email" placeholder="Email" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-    </div>
-    <button onclick="addNewSeller()" style="margin-top:0.7rem;background:#2c5a4a;color:white;border:none;border-radius:8px;padding:7px 18px;font-size:0.8rem;cursor:pointer;">✅ Add Seller</button>
-  </div>
-</div>
+
 <!-- ✅ NEW: Coupons Tab -->
 <div id="tab-coupons" class="tab-content">
   <div style="background:#fce4ec;border-radius:14px;padding:1rem;margin-bottom:1rem;border:1px solid #f48fb1;">
@@ -4273,7 +4157,6 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <div id="adminReviewsList"></div>
   </div>
 </div>
-
 <!-- Stock Manager Tab -->
 <div id="tab-stock" class="tab-content">
   <!-- ✅ v36.21: Fully dynamic summary cards — auto-render from getCategories() -->
@@ -4349,6 +4232,28 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <button id="pcat_b2b" class="pcat-tab" onclick="filterAdminProducts('b2b')">🏭 B2B Products</button>
   <span id="pcatCountLabel" style="font-size:0.72rem;color:#c49a6c;font-weight:700;align-self:center;margin-left:auto;"></span>
 </div>
+<!-- ✅ FIX: adminSearchInput — filterAdminByCat() fallback ke liye, category tab na mile tab search box mein filter hoga -->
+<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.7rem;background:#fff;border:1px solid #c8e6c9;border-radius:10px;padding:0.4rem 0.7rem;">
+  <span style="font-size:0.8rem;">🔍</span>
+  <input type="text" id="adminSearchInput" placeholder="Product name ya category se search karein..." oninput="adminProductSearch(this.value)" style="flex:1;border:none;outline:none;font-size:0.78rem;color:#333;background:transparent;">
+  <button onclick="document.getElementById('adminSearchInput').value='';adminProductSearch('');document.getElementById('adminSearchInput').focus();" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:0.85rem;padding:0;" title="Clear search">✕</button>
+</div>
+<script>
+// ✅ FIX: adminProductSearch — #adminSearchInput ka live filter handler
+function adminProductSearch(query) {
+  const q = (query || '').toLowerCase().trim();
+  const rows = document.querySelectorAll('#adminProductsList tr');
+  let visible = 0;
+  rows.forEach(function(row) {
+    const text = row.textContent.toLowerCase();
+    const show = !q || text.includes(q);
+    row.style.display = show ? '' : 'none';
+    if(show) visible++;
+  });
+  const lbl = document.getElementById('pcatCountLabel');
+  if(lbl) lbl.textContent = q ? (visible + ' result' + (visible !== 1 ? 's' : '')) : '';
+}
+</script>
 <style>
 .pcat-tab{padding:0.3rem 0.75rem;border:1.5px solid #c8e6c9;background:white;border-radius:20px;cursor:pointer;font-weight:600;font-size:0.72rem;color:#6b5e4a;transition:all 0.2s;}
 .pcat-tab:hover{border-color:#2c5a4a;color:#2c5a4a;}
@@ -4486,6 +4391,17 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <button id="adtBtn_payments" onclick="adminDistSubTab('payments')" style="padding:5px 14px;border-radius:20px;border:1px solid #ccc;background:white;color:#555;font-size:0.75rem;font-weight:600;cursor:pointer;">💳 Payments <span id="adtPayBadge" style="display:none;background:#e74c3c;color:white;border-radius:50%;font-size:0.6rem;padding:1px 5px;margin-left:3px;">0</span></button>
     <button id="adtBtn_tickets"  onclick="adminDistSubTab('tickets')"  style="padding:5px 14px;border-radius:20px;border:1px solid #ccc;background:white;color:#555;font-size:0.75rem;font-weight:600;cursor:pointer;">🎫 Tickets <span id="adtTickBadge" style="display:none;background:#e74c3c;color:white;border-radius:50%;font-size:0.6rem;padding:1px 5px;margin-left:3px;">0</span></button>
     <button id="adtBtn_credit"   onclick="adminDistSubTab('credit')"   style="padding:5px 14px;border-radius:20px;border:1px solid #ccc;background:white;color:#555;font-size:0.75rem;font-weight:600;cursor:pointer;">📒 Credit / Ledger</button>
+  </div>
+
+  <!-- ✅ v42: Distributor Notice Board (Admin sets, distributors see it) -->
+  <div style="background:linear-gradient(135deg,#fff8ee,#f5e8cc);border-radius:14px;padding:0.9rem;margin-bottom:0.9rem;border:1px solid #c49a6c;">
+    <div style="font-size:0.82rem;font-weight:700;color:#c49a6c;margin-bottom:0.5rem;">📢 Distributor Notice / Announcement</div>
+    <textarea id="adminDistNoticeInput" rows="3" placeholder="Distributors ko koi notice dena ho toh yahan likhein (e.g. New stock update, payment policy change...)" style="width:100%;padding:0.5rem;border:1px solid #c49a6c;border-radius:8px;font-size:0.8rem;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+      <button onclick="adminSaveDistNotice()" style="flex:1;padding:0.45rem;background:#c49a6c;color:white;border:none;border-radius:8px;font-weight:700;font-size:0.78rem;cursor:pointer;">💾 Save Notice</button>
+      <button onclick="adminClearDistNotice()" style="padding:0.45rem 0.9rem;background:#ff4444;color:white;border:none;border-radius:8px;font-weight:600;font-size:0.78rem;cursor:pointer;">🗑️ Clear</button>
+    </div>
+    <div id="distNoticeAdminStatus" style="font-size:0.72rem;color:#888;margin-top:0.4rem;"></div>
   </div>
 
   <!-- ── SUB-TAB: Distributors List (existing) ── -->
@@ -5413,16 +5329,16 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 
     <div style="background:#fff0f8;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #ffccee;">
       <h4 style="margin-bottom:0.5rem;color:#cc3366;">🗑️ Data Reset</h4>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Clear test data — Orders, Users, Bills, Enquiries, Sellers, Distributors, and Coupons will be reset. Products will be preserved; stock will be set to zero.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Clear test data — Orders, Users, Bills, Enquiries, Distributors, and Coupons will be reset. Products will be preserved; stock will be set to zero.</p>
       <button onclick="clearAllTestData()" style="width:100%;padding:0.6rem;background:#cc3366;color:white;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:0.9rem;">🗑️ Reset All Test Data (Supabase + Cache)</button>
     </div>
     <div style="background:#e8f5e9;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #a5d6a7;">
       <h4 style="margin-bottom:1rem;color:#2c5a4a;">💳 Payment & GST Settings</h4>
       <label style="font-size:0.8rem;font-weight:600;color:#6b5e4a;">🏛️ Company GSTIN</label>
-      <input type="text" id="settingGSTIN" placeholder="e.g. 10AAJCN9076F1ZF" style="width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:8px;margin-bottom:0.5rem;font-family:monospace;letter-spacing:0.5px;" maxlength="15" oninput="autoFillSellerStateFromGSTIN()">
-      <label style="font-size:0.8rem;font-weight:600;color:#6b5e4a;">🗺️ Seller State (GST ke liye)</label>
+      <input type="text" id="settingGSTIN" placeholder="e.g. 10AAJCN9076F1ZF" style="width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:8px;margin-bottom:0.5rem;font-family:monospace;letter-spacing:0.5px;" maxlength="15" oninput="autoFillCompanyStateFromGSTIN()">
+      <label style="font-size:0.8rem;font-weight:600;color:#6b5e4a;">🗺️ Company State (GST ke liye)</label>
       <select id="settingSellerState" style="width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:8px;margin-bottom:0.7rem;font-size:0.82rem;">
-        <option value="">-- Seller State Select Karein --</option>
+        <option value="">-- Company State Select Karein --</option>
         <option value="01">01 - Jammu & Kashmir</option>
         <option value="02">02 - Himachal Pradesh</option>
         <option value="03">03 - Punjab</option>
@@ -6083,46 +5999,92 @@ function filterRetailProducts(cat) {
 }
 
 function displayProducts() {
+    // ✅ v42: Fully dynamic — works for ANY retail category, no hardcoding
     let currentFilter = typeof _currentRetailFilter !== 'undefined' ? _currentRetailFilter : 'all';
 
-    let teaProducts = products.filter(p => {
-        if(currentFilter === 'tea') return getProductCategory4(p, false) === 'retail_tea';
-        if(currentFilter === 'makhana') return false;
-        if(currentFilter && currentFilter.startsWith('dyncat:')) return false;
-        return getProductCategory4(p, false) === 'retail_tea';
-    });
-    let makhanaProducts = products.filter(p => {
-        let c = getProductCategory4(p, false);
-        if(currentFilter === 'makhana') return c === 'retail_makhana' || c.startsWith('custom_retail:');
-        if(currentFilter === 'tea') return false;
-        if(currentFilter && currentFilter.startsWith('dyncat:')) {
-            let dynCat = currentFilter.replace('dyncat:','');
-            return (p.category || '').toLowerCase() === dynCat.toLowerCase();
-        }
-        return c === 'retail_makhana' || c.startsWith('custom_retail:');
-    });
+    // ── Get all Retail categories from categories list ──
+    let allCats = (typeof getCategories === 'function') ? getCategories() : [];
+    let retailCats = allCats.filter(c => c.toLowerCase().startsWith('retail '));
+    // Fallback: agar categories list khali ho toh products ke categories se banao
+    if(!retailCats.length) {
+        retailCats = [...new Set(products.map(p => p.category).filter(Boolean)
+            .filter(c => c.toLowerCase().startsWith('retail ')))].sort();
+    }
+    // Ultimate fallback
+    if(!retailCats.length) retailCats = ['Retail Tea', 'Retail Makhana'];
 
-    let showTea = currentFilter === 'all' || currentFilter === 'tea';
-    let showMakhana = currentFilter === 'all' || currentFilter === 'makhana' || (currentFilter && currentFilter.startsWith('dyncat:'));
+    // ── Heading color palette ──
+    const _retailHeadingStyles = [
+        {bg:'linear-gradient(135deg,#e3f2fd,#bbdefb)', border:'#1565c0', color:'#1565c0'},
+        {bg:'linear-gradient(135deg,#f3e5f5,#e1bee7)', border:'#7b1fa2', color:'#7b1fa2'},
+        {bg:'linear-gradient(135deg,#e8f5e9,#c8e6c9)', border:'#2c5a4a', color:'#2c5a4a'},
+        {bg:'linear-gradient(135deg,#fff8e1,#ffecb3)', border:'#f57f17', color:'#f57f17'},
+        {bg:'linear-gradient(135deg,#fce4ec,#f8bbd9)', border:'#880e4f', color:'#880e4f'},
+        {bg:'linear-gradient(135deg,#e8eaf6,#c5cae9)', border:'#1a237e', color:'#1a237e'},
+        {bg:'linear-gradient(135deg,#e0f2f1,#b2dfdb)', border:'#004d40', color:'#004d40'},
+    ];
 
-    let teaGrid = document.getElementById('retailTeaGrid');
-    let makhanaGrid = document.getElementById('retailMakhanaGrid');
-    let teaHeading = document.getElementById('retailTeaHeading');
-    let makhanaHeading = document.getElementById('retailMakhanaHeading');
-
-    if(teaGrid) teaGrid.innerHTML = showTea ? teaProducts.map(buildRetailCard).join('') : '';
-    if(makhanaGrid) makhanaGrid.innerHTML = showMakhana ? makhanaProducts.map(buildRetailCard).join('') : '';
-    if(teaHeading) teaHeading.style.display = showTea && teaProducts.length > 0 ? 'block' : 'none';
-    if(makhanaHeading) {
-        let makhanaLabel = currentFilter && currentFilter.startsWith('dyncat:')
-            ? currentFilter.replace('dyncat:','').replace(/^Retail\s+/i,'')
-            : 'Retail Makhana';
-        let labelEl = makhanaHeading.querySelector('span:last-child');
-        if(labelEl) labelEl.textContent = makhanaLabel;
-        makhanaHeading.style.display = showMakhana && makhanaProducts.length > 0 ? 'block' : 'none';
+    function _retailCatEmoji(catLower) {
+        if(catLower.includes('tea') || catLower.includes('chai')) return '☕';
+        if(catLower.includes('makhana')) return '🌾';
+        if(catLower.includes('personal care') || catLower.includes('care')) return '🧴';
+        if(catLower.includes('spice') || catLower.includes('masala')) return '🌶️';
+        if(catLower.includes('rice') || catLower.includes('grain')) return '🍚';
+        return '🏷️';
     }
 
-    // Legacy grid saaf karo
+    // ── Determine which categories to show based on current filter ──
+    let catsToShow = [];
+    if(currentFilter === 'all') {
+        catsToShow = retailCats;
+    } else if(currentFilter && currentFilter.startsWith('dyncat:')) {
+        let dynCat = currentFilter.replace('dyncat:', '');
+        catsToShow = retailCats.filter(c => c.toLowerCase() === dynCat.toLowerCase());
+        if(!catsToShow.length) catsToShow = [dynCat]; // fallback
+    } else {
+        // Direct category name match (legacy 'tea'/'makhana' filter support)
+        let matched = retailCats.find(c => {
+            let cl = c.toLowerCase();
+            return cl === currentFilter.toLowerCase()
+                || cl === 'retail ' + currentFilter.toLowerCase()
+                || cl.includes(currentFilter.toLowerCase());
+        });
+        catsToShow = matched ? [matched] : retailCats;
+    }
+
+    // ── Build dynamic grids HTML ──
+    let dynamicContainer = document.getElementById('retailDynamicGrids');
+    if(!dynamicContainer) return;
+
+    let html = '';
+    catsToShow.forEach(function(cat, idx) {
+        let catLower = cat.toLowerCase();
+        let catDisplay = cat.replace(/^Retail\s+/i, '');
+        let emoji = _retailCatEmoji(catLower);
+        let style = _retailHeadingStyles[idx % _retailHeadingStyles.length];
+        // Match products by exact category name (case-insensitive)
+        let catProducts = products.filter(function(p) {
+            return (p.category || '').toLowerCase().trim() === catLower;
+        });
+        if(!catProducts.length) return; // skip empty categories
+
+        let cardsHtml = catProducts.map(buildRetailCard).join('');
+        html += '<div style="margin-bottom:2rem;">'
+            + '<div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:' + style.bg + ';border-radius:12px;border-left:4px solid ' + style.border + ';margin-bottom:0.8rem;">'
+            + '<span style="font-size:1.3rem;">' + emoji + '</span>'
+            + '<span style="font-weight:700;color:' + style.color + ';font-size:0.95rem;">' + catDisplay + '</span>'
+            + '</div>'
+            + '<div class="product-grid">' + cardsHtml + '</div>'
+            + '</div>';
+    });
+
+    if(!html) {
+        html = '<div style="text-align:center;padding:2rem;color:#888;font-size:0.9rem;">🛍️ No retail products available yet</div>';
+    }
+
+    dynamicContainer.innerHTML = html;
+
+    // Legacy grids always saaf karo
     let legacyGrid = document.getElementById('productGrid');
     if(legacyGrid) legacyGrid.innerHTML = '';
 }
@@ -6374,7 +6336,7 @@ function openProductModal(type, id) {
             // buyNow() directly call karna dangerous hai — order DB mein save hota hai bina payment ke
             waBtn.title = 'Online Payment Required';
             waBtn.onclick = function() {
-                if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+                if(!currentUser) { openUserPanel(); return; }
                 showToast('⚠️ Please pay via UPI for this product — COD not available.', '#e65100');
             };
             let discPrice = Math.round(p.price - p.price * (p.discount||0) / 100);
@@ -6382,7 +6344,7 @@ function openProductModal(type, id) {
             let total = discPrice + courier;
             upiBtn.onclick = function() {
                 // ✅ FIX: Login check - bina login ke UPI modal nahi khulega
-                if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+                if(!currentUser) { openUserPanel(); return; }
                 async function _openUPIWithQR() {
                     window._upiTotal = total;
                     window._upiId = settings.upiId || '43459091963@sbi';
@@ -6994,7 +6956,7 @@ function _renderSavedItems() {
 function toggleCart() { document.getElementById('cartModal').classList.toggle('active'); renderCart(); }
 async function checkout() {
     if(cart.length === 0) { showToast('❌ Your cart is empty! Please add items first.', '#ff4444'); return; }
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0; // ✅ FIX: empty cart -Infinity guard
     // Coupon discount apply karo — ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
@@ -7061,7 +7023,7 @@ async function openUPIPayModal() {
     // ✅ FIX 1: Cart empty check pehle karo
     if(cart.length === 0) { showToast('❌ Cart is empty! Please add items first.', '#ff4444'); return; }
     // ✅ FIX 2: Login check — bina login ke UPI modal nahi khulegа
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
 
     // Calculate current cart total — ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
@@ -7154,7 +7116,7 @@ function copyUPIId() {
 
 async function sendPaymentScreenshotWhatsApp() {
     // ✅ FIX CRITICAL: UPI cart flow mein order pehle save karo, phir WhatsApp bhejo
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return false; }
+    if(!currentUser) { openUserPanel(); return false; }
     if(cart.length === 0) { showToast('❌ Cart is empty!', '#ff4444'); return false; }
 
     let total = window._upiTotal || 0;
@@ -7563,8 +7525,22 @@ function sendBulkEnquiry() {
     showToast('✅ Bulk enquiry WhatsApp pe bhej di!', '#2c5a4a');
 }
 function openUserPanel() {
-    document.getElementById('userModal').classList.add('active');
+    const modal = document.getElementById('userModal');
+    const hdr = document.getElementById('loginPageHeader');
+    const backBtn = document.getElementById('loginPageBackBtn');
+    const inner = document.getElementById('loginPageInner');
+    // ✅ Koi bhi open modal pehle band karo (product detail, etc.)
+    ['productDetailModal','checkoutModal','cartModal','bulkEnquiryModal'].forEach(id => {
+        const m = document.getElementById(id);
+        if(m) { m.style.display = 'none'; m.classList && m.classList.remove('active'); }
+    });
+    modal.classList.add('active');
     if(currentUser) {
+        // Dashboard mode — normal popup
+        modal.classList.remove('login-page');
+        if(hdr) hdr.style.display = 'none';
+        if(backBtn) backBtn.style.display = 'none';
+        if(inner) { inner.style.padding = '0'; inner.style.margin = '0'; }
         document.getElementById('userAuthTabs').style.display = 'none';
         document.getElementById('userLoginForm').style.display = 'none';
         document.getElementById('userRegForm').style.display = 'none';
@@ -7573,6 +7549,11 @@ function openUserPanel() {
         loadDashboard();
         loadUserBills();
     } else {
+        // Login mode — fullscreen page
+        modal.classList.add('login-page');
+        if(hdr) hdr.style.display = 'block';
+        if(backBtn) backBtn.style.display = 'block';
+        if(inner) { inner.style.padding = '1.5rem 1.2rem'; inner.style.background = 'white'; inner.style.borderRadius = '20px'; inner.style.margin = '0 auto 1.5rem'; inner.style.maxWidth = '420px'; inner.style.width = '100%'; inner.style.boxShadow = '0 8px 32px rgba(44,90,74,0.13)'; }
         document.getElementById('userAuthTabs').style.display = 'flex';
         document.getElementById('userLoginForm').style.display = 'block';
         document.getElementById('userRegForm').style.display = 'none';
@@ -7581,7 +7562,11 @@ function openUserPanel() {
         showLoginForm();
     }
 }
-function closeUserPanel() { document.getElementById('userModal').classList.remove('active'); }
+function closeUserPanel() {
+    const modal = document.getElementById('userModal');
+    modal.classList.remove('active');
+    modal.classList.remove('login-page');
+}
 function showLoginForm() {
     document.getElementById('userAuthTabs').style.display = 'flex';
     document.getElementById('btnShowLogin').style.background = '#2c5a4a';
@@ -7682,7 +7667,7 @@ async function doForgotPassword() {
     // Select sirf phone aur email — password field nahi
     let user = null;
     try {
-        const { data, error } = await db.from('users').select('email,phone,name').eq('email', email).single();
+        const { data, error } = await db.from('users').select('email,phone,name').eq('email', email).maybeSingle(); // ✅ FIX: .single()→.maybeSingle() — user not found pe crash prevent
         if(data && !error) {
             user = data;
         }
@@ -7839,9 +7824,17 @@ async function checkUserEmail() {
     let idx = users.findIndex(u => (u.email||'').toLowerCase() === email);
     if(idx >= 0) users[idx] = user; else users.push(user);
 
-    currentUser = user; saveCurrentUser();
-    sbLoadUserCart(); // ✅ FIX v38: Login ke baad Supabase se cart restore karo
-    sbLoadSavedItems(); // ✅ FIX: Save-for-later Supabase se restore karo
+    currentUser = user; 
+    window._lastUserEmail = user.email; // logout pe session delete ke liye
+    try { sessionStorage.setItem('_nxd_se', user.email); } catch(e) {} // sirf email (no sensitive data)
+    saveCurrentUser(); // Supabase mein session save karo
+    sbLoadUserCart(); // ✅ Login ke baad Supabase se cart restore karo
+    sbLoadSavedItems(); // ✅ Save-for-later Supabase se restore karo
+    if(typeof window.sbLoadUserNotifReadIds === 'function') window.sbLoadUserNotifReadIds();
+    // ✅ Login success — fullscreen login page dismiss karo
+    document.getElementById('userModal').classList.remove('login-page');
+    const hdr = document.getElementById('loginPageHeader'); if(hdr) hdr.style.display = 'none';
+    const backBtn = document.getElementById('loginPageBackBtn'); if(backBtn) backBtn.style.display = 'none';
     document.getElementById('userAuthTabs').style.display = 'none';
     document.getElementById('userLoginForm').style.display = 'none';
     document.getElementById('userDashboard').style.display = 'block';
@@ -7905,10 +7898,17 @@ async function userRegister() {
     // ✅ BUG FIX: Show loading, wait for Supabase save before showing dashboard
     showToast('⏳ Creating account...', '#888');
     sbSaveUser(newUser).then(() => {
-        saveCurrentUser();
         users.push(newUser); currentUser = newUser;
-        sbLoadUserCart(); // ✅ FIX v38: Register ke baad bhi cart check karo (returning user)
-        sbLoadSavedItems(); // ✅ FIX: Save-for-later Supabase se restore karo
+        window._lastUserEmail = newUser.email;
+        try { sessionStorage.setItem('_nxd_se', newUser.email); } catch(e) {}
+        saveCurrentUser(); // Supabase mein session save karo
+        sbLoadUserCart(); // Register ke baad cart check karo
+        sbLoadSavedItems(); // Save-for-later Supabase se restore karo
+        if(typeof window.sbLoadUserNotifReadIds === 'function') window.sbLoadUserNotifReadIds();
+        // ✅ Register success — fullscreen login page dismiss karo
+        document.getElementById('userModal').classList.remove('login-page');
+        const hdrR = document.getElementById('loginPageHeader'); if(hdrR) hdrR.style.display = 'none';
+        const backBtnR = document.getElementById('loginPageBackBtn'); if(backBtnR) backBtnR.style.display = 'none';
         document.getElementById('userAuthTabs').style.display = 'none';
         document.getElementById('userRegForm').style.display = 'none';
         document.getElementById('userDashboard').style.display = 'block';
@@ -7942,7 +7942,7 @@ function saveUserPassword() {
     if(!/[0-9]/.test(newPass)) { showUserPassMsg('❌ Password mein 1 Number zaroori hai!', '#ff4444'); return; }
     if(!/[!@#$%^&*]/.test(newPass)) { showUserPassMsg('❌ Password mein 1 Special character (!@#$%^&*) zaroori hai!', '#ff4444'); return; }
     // 🔒 FIX: Supabase se password fetch karke verify karo (in-memory nahi)
-    db.from('users').select('password').eq('email', currentUser.email).single()
+    db.from('users').select('password').eq('email', currentUser.email).maybeSingle() // ✅ FIX: .single()→.maybeSingle() — user row missing pe crash prevent
         .then(async ({ data, error }) => {
             if (error || !data) { showUserPassMsg('❌ Verification failed — try again.', '#ff4444'); return; }
             const ok = await verifyPassword(oldPass, data.password || '');
@@ -8069,7 +8069,14 @@ function loadDashboard() {
     }
     document.getElementById('userOrders').innerHTML = ordersHtml || '<p style="text-align:center;color:#999;font-size:0.85rem;padding:1rem;">No orders yet</p>';
 }
-function userLogout() { currentUser = null; saveCurrentUser(); closeUserPanel(); location.reload(); }
+function userLogout() { 
+    window._lastUserEmail = currentUser ? currentUser.email : null;
+    currentUser = null; 
+    try { sessionStorage.removeItem('_nxd_se'); } catch(e) {}
+    saveCurrentUser(); // Supabase se session delete
+    closeUserPanel(); 
+    location.reload(); 
+}
 function openEditProfile() {
     if(!currentUser) return;
     document.getElementById('editName').value = currentUser.name || '';
@@ -8226,13 +8233,57 @@ async function loadUserBills() {
     el.innerHTML = html;
 }
 // 🔒 FIX #7: saveCurrentUser — password/sensitive fields strip karke sessionStorage mein save karo
+// ✅ v42: User session Supabase mein save karo (sessionStorage removed)
+// Key: nexdrop_user_sess_<email> — per-user session data
 function saveCurrentUser() {
-    if(currentUser) {
+    if(currentUser && currentUser.email) {
         const { password, _newPassword, ...safeUser } = currentUser;
-        try { sessionStorage.setItem('nexdrop_current_user', JSON.stringify(safeUser)); } catch(e) {}
-    } else {
-        try { sessionStorage.removeItem('nexdrop_current_user'); } catch(e) {}
+        // Supabase mein session save karo (fire-and-forget)
+        try {
+            db.from('settings').upsert(
+                { key: 'nexdrop_user_sess_' + safeUser.email, value: JSON.stringify({ ...safeUser, savedAt: Date.now() }) },
+                { onConflict: 'key' }
+            ).then(r => { if(r && r.error) console.log('[session] save failed:', r.error.message); });
+        } catch(e) { console.log('[session] saveCurrentUser error:', e.message); }
+    } else if(!currentUser) {
+        // Logout pe session Supabase se delete karo
+        // Email available nahi hai — in-memory tracking se email get karo
+        if(window._lastUserEmail) {
+            db.from('settings').delete().eq('key', 'nexdrop_user_sess_' + window._lastUserEmail)
+                .then(r => { if(r && r.error) console.log('[session] delete failed:', r.error.message); });
+            window._lastUserEmail = null;
+        }
     }
+}
+// Session restore — Supabase se load karo on page load
+async function _sbRestoreUserSession() {
+    // Pehle check karo: koi session hai Supabase mein? (recent logins ke liye)
+    // Use a lightweight approach: sessionStorage mein sirf email track karo (no sensitive data)
+    try {
+        const _sessEmail = sessionStorage.getItem('_nxd_se'); // only email — no user data
+        if(_sessEmail && !currentUser) {
+            const { data, error } = await db.from('settings')
+                .select('value')
+                .eq('key', 'nexdrop_user_sess_' + _sessEmail)
+                .maybeSingle();
+            if(!error && data && data.value) {
+                const sess = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                // Session max 24 hours valid
+                if(sess && sess.savedAt && (Date.now() - sess.savedAt) < 86400000) {
+                    currentUser = sess;
+                    window._lastUserEmail = sess.email;
+                    sbLoadUserCart();
+                    sbLoadSavedItems();
+                    if(typeof window.sbLoadUserNotifReadIds === 'function') window.sbLoadUserNotifReadIds();
+                    console.log('✅ User session restored from Supabase:', currentUser.email);
+                } else {
+                    // Expired session — delete from Supabase
+                    db.from('settings').delete().eq('key', 'nexdrop_user_sess_' + _sessEmail).then(() => {});
+                    sessionStorage.removeItem('_nxd_se');
+                }
+            }
+        }
+    } catch(e) { console.log('[session] restore error:', e.message); }
 }
 
 function openAdminLogin() {
@@ -8341,7 +8392,7 @@ async function adminLogin() {
             .from('settings')
             .select('value')
             .eq('key', 'admin_credentials')
-            .single();
+            .maybeSingle(); // ✅ FIX: .single()→.maybeSingle() — settings row missing pe crash prevent
         if (!error && adminCred && adminCred.value) {
             let creds = typeof adminCred.value === 'string'
                 ? JSON.parse(adminCred.value)
@@ -8400,7 +8451,6 @@ async function openAdminPanel() {
     loadAdminProducts(); loadAdminOrders(); loadAdminUsers();
     loadBulkList(); loadAdminB2B(); loadSettingsForm();
     loadDealershipList(); // ✅ FIX 1: Dealership tab auto-load on panel open
-    updateSellerBadge();
     await sbLoadBills();
     startAutoRefresh();
     setTimeout(refreshStockDashboard, 300);
@@ -9512,11 +9562,11 @@ function loadSettingsForm() {
     }
     // Payment settings
     let gstinEl = document.getElementById('settingGSTIN'); if(gstinEl) gstinEl.value = settings.gstin || '';
-    // ✅ FIX: Seller state dropdown load karo
-    let sellerStateEl = document.getElementById('settingSellerState');
-    if(sellerStateEl) {
+    // ✅ v42: Company state dropdown load karo (GST ke liye)
+    let companyStateEl = document.getElementById('settingSellerState');
+    if(companyStateEl) {
         let code = settings.sellerStateCode || (settings.gstin && settings.gstin.length >= 2 ? settings.gstin.substring(0,2) : '10');
-        sellerStateEl.value = code;
+        companyStateEl.value = code;
     }
     let upiEl = document.getElementById('settingUpiId'); if(upiEl) upiEl.value = settings.upiId || '';
     let bankNameEl = document.getElementById('settingBankName'); if(bankNameEl) bankNameEl.value = settings.bankName || '';
@@ -9590,9 +9640,9 @@ function removeQRCode() {
     loadSettingsForm();
     showToast('🗑️ QR code removed', '#ff9800');
 }
-function autoFillSellerStateFromGSTIN() {
+function autoFillCompanyStateFromGSTIN() {
     let gstinEl = document.getElementById('settingGSTIN');
-    let stateEl = document.getElementById('settingSellerState');
+    let stateEl = document.getElementById('settingSellerState'); // Company state (GST)
     if(!gstinEl || !stateEl) return;
     let gstin = gstinEl.value.trim();
     if(gstin.length >= 2) {
@@ -9606,16 +9656,16 @@ function autoFillSellerStateFromGSTIN() {
 function savePaymentSettings() {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
     let gstinEl = document.getElementById('settingGSTIN'); if(gstinEl) settings.gstin = gstinEl.value.trim().toUpperCase();
-    // ✅ FIX: Seller state — pehle GSTIN se auto-derive karo, phir manual selection override kare
-    let sellerStateEl = document.getElementById('settingSellerState');
+    // ✅ v42: Company state (GST) — pehle GSTIN se auto-derive karo, phir manual selection override kare
+    let companyStateEl2 = document.getElementById('settingSellerState');
     // Step 1: GSTIN se auto-derive karo (agar GSTIN valid hai)
     if(settings.gstin && settings.gstin.length >= 2) {
         let derivedCode = settings.gstin.substring(0, 2);
         if(/^\d{2}$/.test(derivedCode)) settings.sellerStateCode = derivedCode;
     }
     // Step 2: Agar user ne manually dropdown se state select kiya hai to override karo
-    if(sellerStateEl && sellerStateEl.value) {
-        settings.sellerStateCode = sellerStateEl.value;
+    if(companyStateEl2 && companyStateEl2.value) {
+        settings.sellerStateCode = companyStateEl2.value;
     }
     // Step 3: Fallback — koi bhi nahi to Bihar (10) default
     if(!settings.sellerStateCode) settings.sellerStateCode = '10';
@@ -9765,7 +9815,6 @@ async function clearAllTestData() {
         db.from('bills').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('bulk_enquiries').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('dealership_enquiries').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
-        db.from('sellers').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('distributors').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         // 🔧 FIX v41.2: coupons table ka PK 'code' hai, UUID 'id' nahi — neq('code','') use karo
         db.from('coupons').delete().neq('code', ''),
@@ -9854,7 +9903,7 @@ function switchTab(tab) {
     if(tab==="users") loadAdminUsers();
     if(tab==="bulk") loadBulkList();
     if(tab==="dealership") { loadDealershipData(); loadDealershipList(); }
-    if(tab==="distributors") { adminLoadDistributors(); adminDistSubTab('list'); }
+    if(tab==="distributors") { adminLoadDistributors(); adminDistSubTab('list'); adminLoadDistNotice(); }
     if(tab==="b2b") loadAdminB2B();
     if(tab==="wholesale-invoice") { wiInitDate(); wiLoadSaved(); if(!document.querySelector('#wiItemsBody tr')) wiAddRow(); }
     if(tab==="purchase") { pbInitDate(); pbLoadSuppliers(); pbLoadHistory(); pbUpdateSummary(); if(!document.querySelector('#pbItemsBody tr')) pbAddRow(); }
@@ -9862,446 +9911,15 @@ function switchTab(tab) {
     if(tab==="gst") { loadGSTReport(); gstPopulateYears(); gstSetPeriodMode('monthly'); }
     if(tab==="reports") { loadReports(); setTimeout(loadPnLStatement, 200); }
     if(tab==="settings") loadSettingsForm();
-    if(tab==="sellers") loadSellersTab();
     // ✅ FIX v38: Ye tabs pehle sirf DOMContentLoaded patch mein the — ab directly yahan hain (reliable)
     if(tab==="coupons") setTimeout(loadCouponsList, 100);
     if(tab==="analytics") setTimeout(function(){ loadAnalytics(7); }, 100);
     if(tab==="reviews") setTimeout(loadAdminReviews, 100);
     if(tab==="khata") setTimeout(function(){ if(typeof khataLoadSummary==='function') khataLoadSummary(); if(typeof khataLoadDropdown==='function') khataLoadDropdown(); }, 100);
 }
-// ── SELLERS MANAGEMENT (Supabase) ──
-let _sellersCache = [];
-let _sellerStatusFilter = 'all';
-
-async function sbLoadSellers() {
-    try {
-        const { data, error } = await db.from('sellers').select('*').order('created_at', { ascending: false });
-        if(error) throw error;
-        _sellersCache = (data || []).map(s => ({
-            id: s.id,
-            shopName: s.shop_name || '',
-            owner: s.owner_name || '',
-            phone: s.phone || '',
-            city: s.city || '',
-            gstin: s.gstin || '',
-            email: s.email || '',
-            status: s.status || 'pending',
-            productCount: s.product_count || 0,
-            joined: s.created_at ? new Date(s.created_at).toLocaleDateString('en-IN') : '—'
-        }));
-    } catch(e) {
-        console.log('Sellers load failed:', e.message);
-        _sellersCache = [];
-    }
-}
-
-function filterSellerStatus(status) {
-    _sellerStatusFilter = status;
-    renderSellersTable();
-}
-
-async function loadSellersTab() {
-    const tbody = document.getElementById('adminSellersList');
-    if(tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#aaa;">⏳ Loading...</td></tr>';
-    await sbLoadSellers();
-    renderSellersTable();
-    updateSellerBadge();
-}
-
-function updateSellerBadge() {
-    const pending = _sellersCache.filter(s => s.status === 'pending').length;
-    const badge = document.getElementById('sellerPendingBadge');
-    if(badge) { badge.textContent = pending; badge.style.display = pending > 0 ? 'inline' : 'none'; }
-}
-
-function renderSellersTable() {
-    const q = (document.getElementById('sellerSearchInput')||{}).value || '';
-    const filtered = _sellersCache.filter(s => {
-        const matchStatus = _sellerStatusFilter === 'all' || s.status === _sellerStatusFilter;
-        const matchQ = !q || (s.shopName+s.owner+s.phone+s.city+s.gstin).toLowerCase().includes(q.toLowerCase());
-        return matchStatus && matchQ;
-    });
-    const tbody = document.getElementById('adminSellersList');
-    if(!tbody) return;
-    if(!filtered.length) { tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#999;">No sellers found</td></tr>'; return; }
-    const statusStyle = { approved:'background:#e8f5e9;color:#2e7d32', pending:'background:#fff8e1;color:#f57f17', banned:'background:#f3e5f5;color:#6a1b9a', rejected:'background:#ffebee;color:#c62828' };
-    tbody.innerHTML = filtered.map((s,i) => `<tr>
-        <td style="color:#888">${i+1}</td>
-        <td><b>${esc(s.shopName)||'—'}</b></td>
-        <td>${esc(s.owner)||'—'}</td>
-        <td>${esc(s.phone)||'—'}</td>
-        <td>${esc(s.city)||'—'}</td>
-        <td style="font-size:0.72rem">${esc(s.gstin)||'—'}</td>
-        <td><span style="background:#e8f5e9;color:#2e7d32;border-radius:20px;padding:2px 8px;font-size:0.72rem;">${s.productCount} products</span></td>
-        <td><span style="border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;${statusStyle[s.status]||statusStyle.pending}">${esc(s.status)}</span></td>
-        <td style="font-size:0.72rem;color:#888">${esc(s.joined)}</td>
-        <td style="white-space:nowrap">
-            ${s.status==='pending'?`<button onclick="sellerUpdateStatus('${s.id}','approved')" style="background:#16a34a;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;margin-right:3px;">✓ Approve</button><button onclick="sellerUpdateStatus('${s.id}','rejected')" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">✗ Reject</button>`:''}
-            ${s.status==='approved'?`<button onclick="sellerUpdateStatus('${s.id}','banned')" style="background:#7c3aed;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">🚫 Ban</button>`:''}
-            ${(s.status==='rejected'||s.status==='banned')?`<button onclick="sellerUpdateStatus('${s.id}','approved')" style="background:#2c5a4a;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">↩ Restore</button>`:''}
-            <button onclick="sellerDelete('${s.id}')" style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;margin-left:3px;">🗑️</button>
-        </td>
-    </tr>`).join('');
-}
-
-// ✅ FIX: confirm() hata diya — 2-step toast; restored msg bhi fix
-async function sellerUpdateStatus(id, status) {
-    if(status === 'banned') {
-        let key = '_banSeller_' + id;
-        if(!window[key]) {
-            window[key] = true;
-            showToast('⚠️ Seller ban karna hai? Dobara click karein confirm ke liye.', '#ff9800');
-            setTimeout(function() { if(window[key]) window[key] = false; }, 4000);
-            return;
-        }
-        window[key] = false;
-    }
-    try {
-        const { error } = await db.from('sellers').update({ status }).eq('id', id);
-        if(error) throw error;
-        const s = _sellersCache.find(x => x.id == id);
-        if(s) s.status = status;
-        renderSellersTable(); updateSellerBadge();
-        const msgs = { approved:'✅ Seller approved!', rejected:'❌ Seller rejected!', banned:'🚫 Seller banned!', restored:'↩️ Seller restored!' };
-        showToast(msgs[status] || '✅ Done!');
-    } catch(e) { showToast('❌ Error: ' + e.message); }
-}
-
-async function sellerDelete(id) {
-    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
-    // ✅ FIX: confirm() → 2-step toast
-    let _selDelKey = '_delSeller_' + id;
-    if(!window[_selDelKey]) {
-        window[_selDelKey] = true;
-        showToast('⚠️ Seller permanently delete karna hai? Dobara click karein.', '#ff9800');
-        setTimeout(function(){ window[_selDelKey]=false; }, 4000);
-        return;
-    }
-    window[_selDelKey] = false;
-    try {
-        const { error } = await db.from('sellers').delete().eq('id', id);
-        if(error) throw error;
-        _sellersCache = _sellersCache.filter(x => x.id != id);
-        renderSellersTable(); updateSellerBadge(); showToast('🗑️ Seller deleted!');
-    } catch(e) { showToast('❌ Error: ' + e.message); }
-}
-
-async function addNewSeller() {
-    const shop = document.getElementById('ns_shop').value.trim();
-    const owner = document.getElementById('ns_owner').value.trim();
-    const phone = document.getElementById('ns_phone').value.trim();
-    if(!shop || !owner || !phone) { showToast('Shop name, owner & phone required!'); return; }
-    try {
-        const row = {
-            shop_name: shop, owner_name: owner, phone,
-            city: document.getElementById('ns_city').value.trim(),
-            gstin: document.getElementById('ns_gstin').value.trim(),
-            email: document.getElementById('ns_email').value.trim(),
-            status: 'approved', product_count: 0
-        };
-        const { error } = await db.from('sellers').insert([row]);
-        if(error) throw error;
-        ['ns_shop','ns_owner','ns_phone','ns_city','ns_gstin','ns_email'].forEach(id => document.getElementById(id).value = '');
-        await sbLoadSellers(); renderSellersTable(); updateSellerBadge(); showToast('✅ Seller added!');
-    } catch(e) { showToast('❌ Error: ' + e.message); }
-}
-// ── END SELLERS (ADMIN) ──
-
 // ============================================================
-// 🏪 SELLER PORTAL — Frontend Login / Signup / Dashboard
-// ============================================================
-let currentSeller = null;
 
-// Brute force guard (same pattern as _adminLoginGuard and _distLoginGuard)
-const _sellerLoginGuard = (function() {
-    const STORE_FAILS = 'slg_f';
-    const STORE_LOCK  = 'slg_l';
-    const MAX_FAILS = 5, LOCK_MS = 5 * 60 * 1000;
-    return {
-        isLocked() { const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10); return Date.now() < until; },
-        secondsLeft() { const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10); return Math.ceil((until - Date.now()) / 1000); },
-        recordFail() {
-            let fails = parseInt(sessionStorage.getItem(STORE_FAILS) || '0', 10) + 1;
-            if(fails >= MAX_FAILS) { sessionStorage.setItem(STORE_LOCK, String(Date.now() + LOCK_MS)); sessionStorage.setItem(STORE_FAILS, '0'); }
-            else { sessionStorage.setItem(STORE_FAILS, String(fails)); }
-        },
-        reset() { sessionStorage.removeItem(STORE_FAILS); sessionStorage.removeItem(STORE_LOCK); }
-    };
-})();
 
-// 🔒 sellerHash removed — replaced by hashPassword/verifyPassword (salted SHA-256) [v41.2]
-
-function openSellerLogin() {
-    document.getElementById('sellerLoginEmail').value = '';
-    document.getElementById('sellerLoginPass').value = '';
-    document.getElementById('sellerLoginModal').classList.add('active');
-}
-function closeSellerLogin() {
-    document.getElementById('sellerLoginModal').classList.remove('active');
-    // Reset to main login view
-    var mf = document.getElementById('sellerLoginMainForm'); if(mf) mf.style.display = 'block';
-    var ff = document.getElementById('sellerForgotPassForm'); if(ff) ff.style.display = 'none';
-}
-function openSellerSignup() {
-    closeSellerLogin();
-    document.getElementById('sellerSignupModal').classList.add('active');
-}
-function closeSellerSignup() {
-    document.getElementById('sellerSignupModal').classList.remove('active');
-}
-
-async function sellerRegister() {
-    const shop  = (document.getElementById('sellerRegShop').value || '').trim();
-    const owner = (document.getElementById('sellerRegOwner').value || '').trim();
-    const phone = (document.getElementById('sellerRegPhone').value || '').trim();
-    const email = (document.getElementById('sellerRegEmail').value || '').trim().toLowerCase();
-    const city  = (document.getElementById('sellerRegCity').value || '').trim();
-    const gstin = (document.getElementById('sellerRegGSTIN').value || '').trim().toUpperCase();
-    const pass  = document.getElementById('sellerRegPass').value;
-    const pass2 = document.getElementById('sellerRegPass2').value;
-
-    if (!shop || !owner || !phone || !email || !city || !pass) {
-        showToast('⚠️ Sab required fields fill karo.', '#e67e22'); return;
-    }
-    if (!email.includes('@')) { showToast('❌ Valid email dalein.', '#e67e22'); return; }
-    if (pass !== pass2) { showToast('❌ Passwords match nahi kar rahe.', '#c62828'); return; }
-    if (pass.length < 6) { showToast('⚠️ Password kam se kam 6 characters ka hona chahiye.', '#e67e22'); return; }
-
-    // Duplicate check
-    try {
-        const { data: existing } = await db.from('sellers').select('id').eq('email', email).maybeSingle();
-        if (existing) { showToast('⚠️ Is email se pehle se account hai. Login karo.', '#e67e22'); return; }
-    } catch(e) {}
-
-    // 🔒 FIX C3: hashPassword — try-catch mein wrap karo (HTTP/insecure context silent crash fix)
-    let hash;
-    try {
-        hash = await hashPassword(pass);
-    } catch(e) {
-        console.error('[sellerRegister] hashPassword failed:', e);
-        showToast('❌ Password hashing failed. HTTPS pe open karo ya browser check karo.', '#c62828');
-        return;
-    }
-
-    const row = {
-        shop_name: shop, owner_name: owner, phone, email,
-        city, gstin,
-        password_hash: hash,
-        status: 'pending',
-        product_count: 0,
-        created_at: new Date().toISOString()
-    };
-    try {
-        const { error } = await db.from('sellers').insert([row]);
-        if (error) {
-            console.error('[sellerRegister] Supabase insert error:', JSON.stringify(error));
-            throw error;
-        }
-        closeSellerSignup();
-        showToast('✅ Registration successful! Admin approval ke baad login kar sakte hain. 📞 +91 9006606697', '#1a4a8a');
-    } catch(e) {
-        const msg = (e && e.message) ? e.message : 'Unknown error';
-        console.error('[sellerRegister] catch:', msg);
-        showToast('❌ Registration failed: ' + msg, '#ff4444');
-    }
-}
-
-async function sellerLogin() {
-    if (_sellerLoginGuard.isLocked()) {
-        showToast('⛔ Too many failed attempts! ' + _sellerLoginGuard.secondsLeft() + ' seconds wait karo.', '#c62828');
-        return;
-    }
-    const email = (document.getElementById('sellerLoginEmail').value || '').trim().toLowerCase();
-    const pass  = document.getElementById('sellerLoginPass').value;
-    if (!email || !pass) { showToast('⚠️ Email aur password dono dalein.', '#e67e22'); return; }
-
-    let seller = null;
-    try {
-        const { data, error } = await db.from('sellers').select('*').eq('email', email).maybeSingle();
-        if (!error && data) seller = data;
-    } catch(e) {}
-
-    if (!seller) {
-        _sellerLoginGuard.recordFail();
-        showToast('❌ Yeh email registered nahi hai.', '#c62828'); return;
-    }
-
-    // Password verify
-    if (!seller.password_hash) {
-        showToast('❌ Account mein password set nahi hai. Admin se contact karein.', '#c62828'); return;
-    }
-    // 🔒 FIX C3: Use verifyPassword (salted SHA-256 + backward compat) instead of sellerHash (unsalted)
-    const verified = await verifyPassword(pass, seller.password_hash).catch(() => false);
-    if (!verified) {
-        _sellerLoginGuard.recordFail();
-        showToast('❌ Incorrect password.', '#c62828');
-        document.getElementById('sellerLoginPass').value = '';
-        return;
-    }
-    if (seller.status === 'pending') {
-        showToast('⏳ Account admin approval ke liye pending hai. +91 9006606697 pe contact karein.', '#e67e22'); return;
-    }
-    if (seller.status === 'rejected' || seller.status === 'banned') {
-        showToast('❌ Aapka account reject/ban kar diya gaya hai. Support se sampark karein.', '#c62828'); return;
-    }
-
-    _sellerLoginGuard.reset();
-    const { password_hash, ...safeSeller } = seller;
-    currentSeller = safeSeller;
-    // ✅ FIX v36.19.4: localStorage → sessionStorage (shared device pe session permanently nahi rehna chahiye)
-    sessionStorage.setItem('nexdrop_seller_session', JSON.stringify({ id: safeSeller.id, email: safeSeller.email, shop_name: safeSeller.shop_name }));
-    closeSellerLogin();
-    openSellerDashboard();
-}
-
-function sellerLogout() {
-    currentSeller = null;
-    sessionStorage.removeItem('nexdrop_seller_session');
-    document.getElementById('sellerDashboard').style.display = 'none';
-    showToast('👋 Logged out successfully!', '#1a4a8a');
-}
-
-// ─────────────────────────────────────────────────────────────
-// SELLER FORGOT PASSWORD
-// ─────────────────────────────────────────────────────────────
-function showSellerForgot() {
-    document.getElementById('sellerLoginMainForm').style.display = 'none';
-    document.getElementById('sellerForgotPassForm').style.display = 'block';
-    var msg = document.getElementById('sellerFpMsg');
-    if(msg) { msg.textContent = ''; msg.style.background = ''; msg.style.border = ''; }
-}
-function hideSellerForgot() {
-    document.getElementById('sellerForgotPassForm').style.display = 'none';
-    document.getElementById('sellerLoginMainForm').style.display = 'block';
-    ['sellerFpEmail','sellerFpPhone','sellerFpNewPass','sellerFpConfPass'].forEach(function(id) {
-        var el = document.getElementById(id); if(el) el.value = '';
-    });
-    var msg = document.getElementById('sellerFpMsg');
-    if(msg) { msg.textContent = ''; msg.style.background = ''; msg.style.border = ''; }
-}
-async function doSellerForgotPassword() {
-    var email   = (document.getElementById('sellerFpEmail').value || '').trim().toLowerCase();
-    var phone   = (document.getElementById('sellerFpPhone').value || '').trim().replace(/\D/g, '');
-    var newPass = document.getElementById('sellerFpNewPass').value;
-    var confPass= document.getElementById('sellerFpConfPass').value;
-    var msg     = document.getElementById('sellerFpMsg');
-    function setMsg(text, color) {
-        msg.style.color = color; msg.style.background = color + '18';
-        msg.style.border = '1px solid ' + color + '44'; msg.style.padding = '0.4rem 0.6rem';
-        msg.textContent = text;
-    }
-    if(!email || !email.includes('@'))       { setMsg('❌ Valid email address dalein!', '#ff4444'); return; }
-    if(!phone || phone.length < 10)          { setMsg('❌ Valid 10-digit mobile number dalein!', '#ff4444'); return; }
-    if(!newPass || newPass.length < 6)       { setMsg('❌ Password min 6 characters ka hona chahiye!', '#ff4444'); return; }
-    if(newPass !== confPass)                 { setMsg('❌ Passwords match nahi ho rahe!', '#ff4444'); return; }
-    setMsg('⏳ Verifying... please wait', '#888');
-    try {
-        var r = await db.from('sellers').select('email,phone').eq('email', email).maybeSingle();
-        if(r.error || !r.data) { setMsg('❌ Yeh email registered nahi hai!', '#ff4444'); return; }
-        var storedLast10  = (r.data.phone || '').replace(/\D/g, '').slice(-10);
-        var enteredLast10 = phone.slice(-10);
-        if(storedLast10 !== enteredLast10) { setMsg('❌ Phone number match nahi hua! Registered number dalein.', '#ff4444'); return; }
-        var hashedNew = await hashPassword(newPass);
-        var upR = await db.from('sellers').update({ password_hash: hashedNew }).eq('email', email);
-        if(upR.error) { setMsg('❌ Password update failed: ' + upR.error.message, '#ff4444'); return; }
-        setMsg('✅ Password reset ho gaya! Ab login karein.', '#1a4a8a');
-        setTimeout(function() { hideSellerForgot(); showToast('✅ Seller password reset successful!', '#1a4a8a'); }, 2000);
-    } catch(e) {
-        setMsg('❌ Error: ' + (e.message || 'Please try again'), '#ff4444');
-    }
-}
-
-function openSellerDashboard() {
-    if (!currentSeller) return;
-    const s = currentSeller;
-    document.getElementById('sellerDashWelcome').textContent = '👋 ' + (s.owner_name || s.shop_name);
-    document.getElementById('sellerDashShop').textContent = '🏪 ' + (s.shop_name || '');
-    document.getElementById('sellerDashOwner').textContent = s.owner_name || '';
-    document.getElementById('sellerDashCity').textContent = s.city || '';
-
-    const statusEl = document.getElementById('sellerDashStatus');
-    const statusColors = { approved: '#16a34a', pending: '#e67e22', rejected: '#dc2626', banned: '#7c3aed' };
-    const statusBg = { approved: '#dcfce7', pending: '#fff3cd', rejected: '#fee2e2', banned: '#ede9fe' };
-    statusEl.textContent = (s.status || 'pending').toUpperCase();
-    statusEl.style.color = statusColors[s.status] || '#e67e22';
-    statusEl.style.background = statusBg[s.status] || '#fff3cd';
-
-    const pendingMsg = document.getElementById('sellerPendingMsg');
-    pendingMsg.style.display = (s.status === 'pending') ? 'block' : 'none';
-
-    // ✅ IMPROVE v36.19.4: Richer dashboard — product count, joined date, quick stats
-    const joinedDate = s.created_at ? new Date(s.created_at).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : 'N/A';
-    const productCountHtml = (s.product_count > 0)
-        ? `<div style="background:#e8f5e9;border-radius:8px;padding:0.5rem 0.8rem;margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;">
-              <span style="font-size:1.2rem;">📦</span>
-              <div><div style="font-size:0.85rem;font-weight:700;color:#1a4a2a;">${s.product_count} Products Listed</div>
-              <div style="font-size:0.68rem;color:#666;">Your products on the platform</div></div>
-           </div>`
-        : `<div style="background:#fff3cd;border-radius:8px;padding:0.5rem 0.8rem;margin-top:0.5rem;font-size:0.78rem;color:#856404;">
-              ⚠️ No products listed yet. Contact admin to add your products.
-           </div>`;
-
-    const statusGuide = s.status === 'approved'
-        ? `<div style="background:#e8f5e9;border-left:3px solid #16a34a;border-radius:6px;padding:0.55rem 0.8rem;margin-top:0.6rem;font-size:0.75rem;color:#1a4a2a;">
-              ✅ <strong>Account Active!</strong> Orders will be processed by Nexdrop admin. Contact us for order updates or issues.
-           </div>`
-        : s.status === 'pending'
-        ? `<div style="background:#fff8e1;border-left:3px solid #e67e22;border-radius:6px;padding:0.55rem 0.8rem;margin-top:0.6rem;font-size:0.75rem;color:#854d0e;">
-              ⏳ <strong>Pending Approval:</strong> Admin review mein hai. Approval ke baad aapko WhatsApp par notify kiya jayega.
-           </div>`
-        : '';
-
-    document.getElementById('sellerDashProfile').innerHTML =
-        '📧 <strong>Email:</strong> ' + esc(s.email || '') + '<br>' +
-        '📱 <strong>Phone:</strong> ' + esc(s.phone || '') + '<br>' +
-        (s.city ? '🏙️ <strong>City:</strong> ' + esc(s.city) + '<br>' : '') +
-        (s.gstin ? '🔢 <strong>GSTIN:</strong> ' + esc(s.gstin) + '<br>' : '') +
-        '📅 <strong>Joined:</strong> ' + joinedDate +
-        productCountHtml + statusGuide;
-
-    document.getElementById('sellerDashboard').style.display = 'block';
-}
-
-function sellerContactAdmin() {
-    const waNo = (window.settings && window.settings.whatsappNo) ? window.settings.whatsappNo : '919006606697';
-    const msg = '🏪 *Seller Portal — Nexdrop Mart*\n\nShop: ' + (currentSeller ? currentSeller.shop_name : '') + '\nEmail: ' + (currentSeller ? currentSeller.email : '') + '\n\nI need assistance with my seller account.';
-    window.open('https://wa.me/' + waNo + '?text=' + encodeURIComponent(msg), '_blank');
-}
-
-// Auto-restore seller session on page load
-(function() {
-    try {
-        // ✅ FIX v36.19.4: localStorage → sessionStorage
-        const sess = sessionStorage.getItem('nexdrop_seller_session');
-        if (sess) {
-            const parsed = JSON.parse(sess);
-            if (parsed && parsed.email) {
-                // Temporarily set from session (fast)
-                currentSeller = parsed;
-                // ✅ FIX S-3: Full data Supabase se fetch karo — status, owner_name, city etc. sirf {id,email,shop_name} se nahi milta tha
-                db.from('sellers').select('*').eq('email', parsed.email).maybeSingle().then(function(r) {
-                    if(r && r.data && !r.error) {
-                        var _s = r.data;
-                        var safeS = {};
-                        Object.keys(_s).forEach(function(k) { if(k !== 'password_hash') safeS[k] = _s[k]; });
-                        currentSeller = safeS;
-                        // Session ko fresh data se update karo
-                        sessionStorage.setItem('nexdrop_seller_session', JSON.stringify({ id: safeS.id, email: safeS.email, shop_name: safeS.shop_name }));
-                        console.log('✅ Seller session fully restored:', safeS.email, '| Status:', safeS.status);
-                    } else {
-                        // Account deleted ya banned — session clear karo
-                        currentSeller = null;
-                        sessionStorage.removeItem('nexdrop_seller_session');
-                    }
-                }).catch(function() {
-                    // Network error — partial session data se chalao
-                    console.log('Seller session: Supabase fetch failed, using cached session data.');
-                });
-            }
-        }
-    } catch(e) {}
-})();
-// ── END SELLER PORTAL ──
 
 function adminGoHome() {
     closeAdminPanel();
@@ -10327,63 +9945,30 @@ window.filterHomeProducts = function filterHomeProducts(filter) {
     displayHomeProducts();
 }
 function displayHomeProducts() {
-    let filtered = [];
-    // Tea categories: products with Tea/CTC/Darjeeling/Assam/Herbal/Green in name or category
-    let teaKeywords = ["tea","chai","ctc","darjeeling","assam","green","herbal","kahwa","oolong","masala tea"];
-    let isTeaProduct = p => teaKeywords.some(k => (p.name||"").toLowerCase().includes(k) || (p.category||"").toLowerCase().includes(k));
-    let isMakhanaProduct = p => !isTeaProduct(p);
-
-    if(homeProductFilter === "all") {
-        filtered = [...products.filter(p => p.inStock), ...b2bProducts.filter(p => p.inStock)];
-    } else if(homeProductFilter === "retail_tea") {
-        filtered = products.filter(p => p.inStock && isTeaProduct(p));
-    } else if(homeProductFilter === "wholesale_tea") {
-        filtered = b2bProducts.filter(p => p.inStock && isTeaProduct(p));
-    } else if(homeProductFilter === "retail_makhana") {
-        filtered = products.filter(p => p.inStock && isMakhanaProduct(p));
-    } else if(homeProductFilter === "wholesale_makhana") {
-        filtered = b2bProducts.filter(p => p.inStock && isMakhanaProduct(p));
-    } else if(homeProductFilter && homeProductFilter.startsWith('dyncat:')) {
-        let dynCat = homeProductFilter.slice(7).trim();
-        filtered = [
-            ...products.filter(p => p.inStock && (p.category||'').toLowerCase() === dynCat.toLowerCase()),
-            ...b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === dynCat.toLowerCase())
-        ];
-    } else if(homeProductFilter && homeProductFilter.startsWith('custom:')) {
-        let customCat = homeProductFilter.slice(7).trim();
-        let baseName = customCat.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
-        let retailCat = 'Retail ' + baseName;
-        let wholeCat  = 'Wholesale ' + baseName;
-        let matchRetail = products.filter(p => p.inStock && (p.category||'').toLowerCase() === retailCat.toLowerCase());
-        let matchB2B    = b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === wholeCat.toLowerCase());
-        filtered = [...matchRetail, ...matchB2B];
-    } else {
-        filtered = products.filter(p => p.inStock);
-    }
-    // Tag each item with its type for rendering
+    // ✅ v42: Pure category-match — no hardcoded Tea/Makhana keywords
     let taggedFiltered = [];
-    if(homeProductFilter === "all") {
-        products.filter(p=>p.inStock).forEach(p => taggedFiltered.push({type:"retail", data:p}));
-        b2bProducts.filter(p=>p.inStock).forEach(p => taggedFiltered.push({type:"b2b", data:p}));
-    } else if(homeProductFilter === "wholesale_tea" || homeProductFilter === "wholesale_makhana") {
-        filtered.forEach(p => taggedFiltered.push({type:"b2b", data:p}));
+
+    if(homeProductFilter === 'all') {
+        products.filter(p => p.inStock).forEach(p => taggedFiltered.push({type:'retail', data:p}));
+        b2bProducts.filter(p => p.inStock).forEach(p => taggedFiltered.push({type:'b2b', data:p}));
     } else if(homeProductFilter && homeProductFilter.startsWith('dyncat:')) {
-        let dynCat = homeProductFilter.slice(7).trim();
-        products.filter(p => p.inStock && (p.category||'').toLowerCase() === dynCat.toLowerCase())
-            .forEach(p => taggedFiltered.push({type:"retail", data:p}));
-        b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === dynCat.toLowerCase())
-            .forEach(p => taggedFiltered.push({type:"b2b", data:p}));
+        let dynCat = homeProductFilter.slice(7).trim().toLowerCase();
+        products.filter(p => p.inStock && (p.category||'').toLowerCase() === dynCat)
+            .forEach(p => taggedFiltered.push({type:'retail', data:p}));
+        b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === dynCat)
+            .forEach(p => taggedFiltered.push({type:'b2b', data:p}));
     } else if(homeProductFilter && homeProductFilter.startsWith('custom:')) {
-        let customCat = homeProductFilter.slice(7).trim();
-        let baseName = customCat.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
-        let retailCat = 'Retail ' + baseName;
-        let wholeCat  = 'Wholesale ' + baseName;
-        products.filter(p => p.inStock && (p.category||'').toLowerCase() === retailCat.toLowerCase())
-            .forEach(p => taggedFiltered.push({type:"retail", data:p}));
-        b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === wholeCat.toLowerCase())
-            .forEach(p => taggedFiltered.push({type:"b2b", data:p}));
+        let baseName = homeProductFilter.slice(7).trim().replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
+        let retailCat = ('Retail ' + baseName).toLowerCase();
+        let wholeCat  = ('Wholesale ' + baseName).toLowerCase();
+        products.filter(p => p.inStock && (p.category||'').toLowerCase() === retailCat)
+            .forEach(p => taggedFiltered.push({type:'retail', data:p}));
+        b2bProducts.filter(p => p.inStock && (p.category||'').toLowerCase() === wholeCat)
+            .forEach(p => taggedFiltered.push({type:'b2b', data:p}));
     } else {
-        filtered.forEach(p => taggedFiltered.push({type:"retail", data:p}));
+        // Fallback: all inStock
+        products.filter(p => p.inStock).forEach(p => taggedFiltered.push({type:'retail', data:p}));
+        b2bProducts.filter(p => p.inStock).forEach(p => taggedFiltered.push({type:'b2b', data:p}));
     }
     let html = "";
     for(let item of taggedFiltered.slice(0,8)) {
@@ -12945,7 +12530,7 @@ function pbSaveSuppliers(arr) {
 }
 async function pbLoadSuppliersFromSupabase() {
     try {
-        const { data, error } = await db.from('settings').select('value').eq('key', 'nexdrop_suppliers').single();
+        const { data, error } = await db.from('settings').select('value').eq('key', 'nexdrop_suppliers').maybeSingle(); // ✅ FIX: .single()→.maybeSingle() — settings row missing pe crash prevent
         if(error) throw error;
         if(data && data.value) {
             const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
@@ -15619,7 +15204,7 @@ function setReviewStar(n) {
 function openUserReview(productName) {
     let sec = document.getElementById('userReviewSection');
     let pnEl = document.getElementById('reviewProductName');
-    if(!currentUser) { showToast('❌ Please login first!','#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
     if(!sec) return;
     if(pnEl) pnEl.textContent = productName;
     _reviewStar = 0;
@@ -15629,7 +15214,7 @@ function openUserReview(productName) {
     sec.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 function submitUserReview() {
-    if(!currentUser) { showToast('❌ Please login first!','#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
     if(_reviewStar === 0) { showToast('⭐ Please select a star rating!','#ff9800'); return; }
     let productName = document.getElementById('reviewProductName')?.textContent || '';
     let reviewText = document.getElementById('reviewText')?.value?.trim() || '';
@@ -15785,13 +15370,13 @@ function pdmSetStar(n) {
 }
 
 function pdmOpenWriteReview() {
-    if(!currentUser) { document.getElementById('productDetailModal').style.display='none'; showToast('❌ Pehle login karein!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { document.getElementById('productDetailModal').style.display='none'; openUserPanel(); return; }
     let form = document.getElementById('pdm_writeReviewForm');
     if(form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; }
 }
 
 function pdmSubmitReview() {
-    if(!currentUser) { document.getElementById('productDetailModal').style.display='none'; showToast('❌ Pehle login karein!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { document.getElementById('productDetailModal').style.display='none'; openUserPanel(); return; }
     if(_pdmStar === 0) { showToast('⭐ Star rating select karein!', '#ff9800'); return; }
     let text = (document.getElementById('pdm_reviewText')?.value||'').trim();
     if(text.length < 10) { showToast('✍️ Thoda aur likhein (min 10 chars)!', '#ff9800'); return; }
@@ -16860,6 +16445,14 @@ async function distLogin() {
     const { password_hash, ...safeDist } = dist;
     currentDistributor = safeDist;
     sessionStorage.setItem('nexdrop_dist_session', JSON.stringify({ id: safeDist.id, email: safeDist.email, name: safeDist.name }));
+    // ✅ v42: Supabase se read IDs load karo (persistent across sessions)
+    try {
+        db.from('settings').select('value').eq('key', 'dist_read_ids_' + safeDist.email).maybeSingle().then(function(r) {
+            if(r && r.data && r.data.value) {
+                try { _distReadIds[safeDist.email] = JSON.parse(r.data.value); } catch(e) {}
+            }
+        });
+    } catch(e) {}
     closeDistributorLogin();
     openDistributorDashboard();
 }
@@ -17045,6 +16638,36 @@ async function distChangePassword() {
 
 let _adminDistributors = [];
 let _distCurrentFilter = 'all';
+
+// ✅ v42: Distributor Notice — Admin save/clear/load
+async function adminSaveDistNotice() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
+    let inp = document.getElementById('adminDistNoticeInput');
+    let val = (inp ? inp.value : '').trim();
+    let statusEl = document.getElementById('distNoticeAdminStatus');
+    try {
+        const { error } = await db.from('settings').upsert({ key: 'dist_notice', value: val }, { onConflict: 'key' });
+        if(error) throw error;
+        showToast(val ? '✅ Notice distributors ko dikh rahi hai!' : '✅ Notice cleared!', '#2c5a4a');
+        if(statusEl) statusEl.textContent = val ? '✅ Active: "' + val.slice(0,60) + (val.length>60?'…':'') + '"' : '(No active notice)';
+    } catch(e) { showToast('❌ Save failed: ' + e.message, '#c62828'); }
+}
+async function adminClearDistNotice() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
+    let inp = document.getElementById('adminDistNoticeInput');
+    if(inp) inp.value = '';
+    await adminSaveDistNotice();
+}
+async function adminLoadDistNotice() {
+    try {
+        const { data } = await db.from('settings').select('value').eq('key','dist_notice').maybeSingle();
+        let inp = document.getElementById('adminDistNoticeInput');
+        let statusEl = document.getElementById('distNoticeAdminStatus');
+        let val = (data && data.value) ? data.value : '';
+        if(inp) inp.value = val;
+        if(statusEl) statusEl.textContent = val ? '✅ Active: "' + val.slice(0,60) + (val.length>60?'…':'') + '"' : '(No active notice)';
+    } catch(e) {}
+}
 
 async function adminLoadDistributors() {
     const el = document.getElementById('adminDistributorList');
@@ -17581,7 +17204,7 @@ async function distLoadNotifs() {
         if (nd && nd.value && nd.value.trim()) {
             notifs.unshift({ id: 'notice', title: '📢 Notice from Admin', msg: nd.value, time: '', type: 'notice' });
         }
-        // Read status from localStorage
+        // ✅ Read state Supabase se load hoti hai — _distReadIds[email] mein cached
         const readIds = _distReadIds[currentDistributor?.email || ''] || [];
         // Update badge
         const unread = notifs.filter(n => !readIds.includes(String(n.id))).length;
@@ -17608,7 +17231,16 @@ function distMarkNotifRead(id) {
     if (!currentDistributor) return;
     const key = currentDistributor.email;
     if(!_distReadIds[key]) _distReadIds[key] = [];
-    if (!_distReadIds[key].includes(String(id))) { _distReadIds[key].push(String(id)); }
+    if (!_distReadIds[key].includes(String(id))) {
+        _distReadIds[key].push(String(id));
+        // ✅ v42: Supabase mein save karo (settings table)
+        try {
+            db.from('settings').upsert(
+                { key: 'dist_read_ids_' + key, value: JSON.stringify(_distReadIds[key]) },
+                { onConflict: 'key' }
+            ).then(function(r){ if(r && r.error) console.log('distReadIds save error:', r.error.message); });
+        } catch(e) { console.log('distMarkNotifRead save error:', e.message); }
+    }
     distLoadNotifs();
 }
 
@@ -17617,6 +17249,13 @@ function distMarkAllNotifsRead() {
     const key = currentDistributor.email;
     const allIds = Array.from(document.querySelectorAll('#distNotifList [onclick]')).map(el => el.getAttribute('onclick').match(/'([^']+)'/)?.[1]).filter(Boolean);
     _distReadIds[key] = allIds;
+    // ✅ v42: Supabase mein save karo
+    try {
+        db.from('settings').upsert(
+            { key: 'dist_read_ids_' + key, value: JSON.stringify(allIds) },
+            { onConflict: 'key' }
+        ).then(function(r){ if(r && r.error) console.log('distReadIds save error:', r.error.message); });
+    } catch(e) { console.log('distMarkAllNotifsRead save error:', e.message); }
     distLoadNotifs();
     showToast('✅ All notifications read!', '#2c5a4a');
 }
@@ -18651,7 +18290,7 @@ function catEditSave(tab, id) {
 <script>
 function openOrderSummary() {
     if(cart.length === 0) { showToast('❌ Cart empty! Add items first.', '#ff4444'); return; }
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
 
     // --- Calculate totals ---
     let mrp = cart.reduce((s,i) => {
@@ -19492,20 +19131,57 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
         return notifs;
     };
 
+    // ✅ FIX: User notif read IDs — sessionStorage → Supabase (persistent across sessions/devices)
+    // In-memory cache: email → Set of read notif IDs
+    window._userNotifReadIds = {}; // { email: Set<string> }
+
+    // Supabase se read IDs load karo (login/session restore ke baad call karo)
+    window.sbLoadUserNotifReadIds = async function() {
+        if(!currentUser || !currentUser.email) return;
+        try {
+            const key = 'user_notif_read_' + currentUser.email;
+            const { data, error } = await db.from('settings').select('value').eq('key', key).maybeSingle();
+            if(!error && data && data.value) {
+                const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                window._userNotifReadIds[currentUser.email] = new Set(Array.isArray(arr) ? arr.map(String) : []);
+                console.log('✅ User notif read IDs Supabase se load hue:', window._userNotifReadIds[currentUser.email].size);
+            } else {
+                window._userNotifReadIds[currentUser.email] = new Set();
+            }
+        } catch(e) {
+            console.log('sbLoadUserNotifReadIds error:', e.message);
+            if(currentUser) window._userNotifReadIds[currentUser.email] = new Set();
+        }
+    };
+
+    // Supabase mein save karo (fire-and-forget)
+    function _saveUserNotifReadIds() {
+        if(!currentUser || !currentUser.email) return;
+        const readSet = window._userNotifReadIds[currentUser.email] || new Set();
+        const key = 'user_notif_read_' + currentUser.email;
+        try {
+            db.from('settings').upsert(
+                { key: key, value: JSON.stringify([...readSet]) },
+                { onConflict: 'key' }
+            ).then(function(r){ if(r && r.error) console.log('userNotifReadIds save error:', r.error.message); });
+        } catch(e) { console.log('_saveUserNotifReadIds error:', e.message); }
+    }
+
     window.renderUserNotifPanel = function() {
         var el = document.getElementById('userNotifList');
         if(!el) return;
         var notifs = window.buildUserNotifs();
-        var unreadKey = 'ndNotifRead_' + (currentUser ? currentUser.email : '');
-        var readSet = new Set();
-        try { readSet = new Set(JSON.parse(sessionStorage.getItem(unreadKey) || '[]')); } catch(e) {}
+        // ✅ FIX: sessionStorage → Supabase-synced in-memory cache
+        var readSet = (currentUser && currentUser.email && window._userNotifReadIds[currentUser.email])
+            ? window._userNotifReadIds[currentUser.email]
+            : new Set();
 
         if(notifs.length === 0) {
             el.innerHTML = '<div style="text-align:center;padding:0.8rem;color:#bbb;font-size:0.78rem;">🔔 Koi notification nahi hai</div>';
             return;
         }
         el.innerHTML = notifs.slice(0,15).map(function(n) {
-            var isRead = readSet.has(n.id);
+            var isRead = readSet.has(String(n.id));
             return '<div onclick="markNotifRead(\'' + n.id + '\')" style="display:flex;gap:0.5rem;padding:0.5rem 0;border-bottom:1px solid #f0f0f0;cursor:pointer;' + (!isRead ? 'background:#fffde7;margin:0 -0.5rem;padding:0.5rem;border-radius:6px;' : '') + '">' +
                 '<div style="font-size:1rem;flex-shrink:0;margin-top:1px;">' + n.icon + '</div>' +
                 '<div style="flex:1;min-width:0;">' +
@@ -19517,25 +19193,26 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
         }).join('');
 
         // Update bell badge
-        var unread = notifs.filter(function(n) { return !readSet.has(n.id); }).length;
+        var unread = notifs.filter(function(n) { return !readSet.has(String(n.id)); }).length;
         var badge = document.getElementById('userNotifBadge');
         if(badge) { badge.textContent = unread > 0 ? unread : ''; badge.style.display = unread > 0 ? 'inline-block' : 'none'; }
     };
 
     window.markNotifRead = function(notifId) {
-        var unreadKey = 'ndNotifRead_' + (currentUser ? currentUser.email : '');
-        var readSet = new Set();
-        try { readSet = new Set(JSON.parse(sessionStorage.getItem(unreadKey) || '[]')); } catch(e) {}
-        readSet.add(notifId);
-        try { sessionStorage.setItem(unreadKey, JSON.stringify([...readSet])); } catch(e) {}
+        if(!currentUser || !currentUser.email) return;
+        // ✅ FIX: sessionStorage → in-memory + Supabase sync
+        if(!window._userNotifReadIds[currentUser.email]) window._userNotifReadIds[currentUser.email] = new Set();
+        window._userNotifReadIds[currentUser.email].add(String(notifId));
+        _saveUserNotifReadIds();
         renderUserNotifPanel();
     };
 
     window.markAllNotifsRead = function() {
+        if(!currentUser || !currentUser.email) return;
         var notifs = window.buildUserNotifs();
-        var unreadKey = 'ndNotifRead_' + (currentUser ? currentUser.email : '');
-        var allIds = notifs.map(function(n) { return n.id; });
-        try { sessionStorage.setItem(unreadKey, JSON.stringify(allIds)); } catch(e) {}
+        // ✅ FIX: sessionStorage → in-memory + Supabase sync
+        window._userNotifReadIds[currentUser.email] = new Set(notifs.map(function(n) { return String(n.id); }));
+        _saveUserNotifReadIds();
         renderUserNotifPanel();
         showToast('✅ Saare notifications read mark ho gaye', '#2c5a4a');
     };
@@ -19739,7 +19416,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 700);
 });
 
-console.log('✅ [v41.4] ALL AUDIT FIXES: [C-1] uploadB2BPhoto MIME check; [C-2] uploadExtraPhoto MIME+onerror+validCount; [M-1] sbSaveBill order_id coercion; [M-2] downloadOrderText XSS (textarea.value); [L-1] sbSaveProduct rating+rating_count; [L-4] freeMin null fallback; [S-1] distLogin dual-hash+auto-migrate; [S-2] distRegister hashPassword+email-validation; [S-3] Seller full session restore from Supabase');
+console.log('✅ [v42.0] MAJOR UPDATE: [S-1] Seller system FULLY REMOVED (admin tab, tab HTML, all JS functions); [S-2] User session sessionStorage→Supabase (nexdrop_user_sess_<email>); [S-3] Company State label updated; [D-1] loadDashboard all Supabase; [D-2] Settings functions verified; [D-3] localStorage = 0 usages');
 console.log('✅ [v41.3] Seller + Distributor Forgot Password: showSellerForgot/doSellerForgotPassword + showDistForgot/doDistForgotPassword — email+phone verify, hashPassword, Supabase update; closeSellerLogin/closeDistributorLogin reset form state');
 console.log('✅ [v41.1] BUG FIX AUDIT: [M-1] doForgotPassword brute force guard added (_userLoginGuard.isLocked + recordFail); [M-2] name-based order match removed (6 locations — privacy leak fix); [M-3] _userLoginGuard declaration moved before usage (TDZ safety); [M-4] settings.adminUsername leak removed; [M-5] users[].password in-memory sync removed; [L-2] setInterval max retry ×4 (patchWL/OA/Notif/CH); [C-3] unsafe-eval removed from CSP');
 console.log('✅ [v41.0] SECURITY AUDIT FIXES: [C1] User login brute force (_userLoginGuard 5 fail→5min lockout); [C3] Seller portal sellerHash→hashPassword/verifyPassword (salted SHA-256); [H1] Carousel esc(p.name) XSS fix; [H3] exportUsersOnly password strip; [M1] safeSave error surfacing; [M2] adminDistWhatsApp helper (XSS-safe); [M5] SW registration improved (try /sw.js first)');
@@ -19747,7 +19424,7 @@ console.log('✅ [v40.2] SETTINGS AUDIT: importMergeData+importReplaceData bills
 console.log('✅ [PATCH v40.3] SECURITY FIXES: #1 XSS esc(q) searchHomeProducts line 11937, #2 Coupon code regex validation [A-Z0-9_-], #3 Admin idle auto-logout 30min, #4 Stock unsaved changes banner, #5 liveStockColor banner sync');
 console.log('✅ [v40.1] FULL RE-VERIFY AUDIT: CRITICAL distLoadProductCatalog window.products overwrite fixed → _distCatalogProducts; distRenderCatalog+distOnProductChange+distAddToCart+distPlaceOrder+distReorder patched; stale comments cleaned (checkout, loadCart, safeSave header)');
 console.log('✅ [PATCH v39.4] BUG FIXES: #1 deleteOrder key undefined, #2 _logStockDeduction Delivered, #3 perUserLimit coupon, #4 getCouponDiscount centralized (6 duplicates), #5 couponHistory timing 150→1500ms+retry');
-console.log('✅ [PATCH v39.2] ZERO localStorage: rls_dismissed→sessionStorage, cart sessionStorage backup removed (Supabase primary)');console.log('✅ [PATCH v39.1] Audit fixes: BUG#1 distDeleteDoc(docId→index), BUG#2 _origLSGet/_origLSSet no-ops removed, BUG#3 ignoreDuplicates unsupported removed, BUG#4 GST display consistency (computedGstTotal), BUG#5 multi-slab GST label, SEC#3 category XSS esc(), SEC#4 renameModal DOM property, CQ#4 orders→distOrders shadow fix');
+console.log('✅ [v41.5] SUPABASE-ONLY STORAGE: User notif read state sessionStorage→Supabase (key: user_notif_read_<email>); sbLoadUserNotifReadIds() added; called at login+register+session-restore; stale localStorage comment in distLoadNotifs fixed; renderUserNotifPanel+markNotifRead+markAllNotifsRead use _userNotifReadIds in-memory+Supabase sync');console.log('✅ [PATCH v39.1] Audit fixes: BUG#1 distDeleteDoc(docId→index), BUG#2 _origLSGet/_origLSSet no-ops removed, BUG#3 ignoreDuplicates unsupported removed, BUG#4 GST display consistency (computedGstTotal), BUG#5 multi-slab GST label, SEC#3 category XSS esc(), SEC#4 renameModal DOM property, CQ#4 orders→distOrders shadow fix');
 console.log('✅ [PATCH v39.0] 4 Admin Distributor features: Sub-tabs, Payment Verification, Support Ticket Management, Credit Limit + Manual Ledger');
 console.log('✅ [PATCH v38.0] 5 User Panel features added: Wishlist, Cancel/Return, Notifications, Coupon History, Download Bill');
 </script>
