@@ -7177,7 +7177,7 @@ function _renderSavedItems() {
 function toggleCart() { document.getElementById('cartModal').classList.toggle('active'); renderCart(); }
 async function checkout() {
     if(cart.length === 0) { showToast('❌ Your cart is empty! Please add items first.', '#ff4444'); return; }
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); if(document.getElementById('cartModal').classList.contains('active')) toggleCart(); openUserPanel(); return; }
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0; // ✅ FIX: empty cart -Infinity guard
     // Coupon discount apply karo — ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
@@ -7244,7 +7244,7 @@ async function openUPIPayModal() {
     // ✅ FIX 1: Cart empty check pehle karo
     if(cart.length === 0) { showToast('❌ Cart is empty! Please add items first.', '#ff4444'); return; }
     // ✅ FIX 2: Login check — bina login ke UPI modal nahi khulegа
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); if(document.getElementById('cartModal').classList.contains('active')) toggleCart(); openUserPanel(); return; }
 
     // Calculate current cart total — ✅ BUG#4 FIX v39.4: getCouponDiscount() use karo
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
