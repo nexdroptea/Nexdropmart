@@ -10230,15 +10230,20 @@ async function clearAllTestData() {
 
     showToast('⏳ Resetting...', '#ff9800');
 
+    // 🔧 FIX v43.2 BUG#1+BUG#2: User emails aur khata customers PEHLE collect karo,
+    // BAAD mein in-memory clear karo — warna empty array se per-user keys delete nahi hote!
+    const userEmailsForReset = (users || []).map(u => u.email).filter(Boolean);
+    const khataCustomersForReset = khataGetAll().slice(); // snapshot before clear
+
     // 1. In-memory reset
     orders = []; users = []; bulkEnquiries = []; currentUser = null;
     bills = []; bulkEnquiries = []; dealershipEnquiries = [];
-    // ✅ v40.1 FIX: _wiBills, _pbBills, _khataCustomers, _khataEntries bhi reset karo (Supabase delete ke baad stale data prevent)
+    // ✅ v40.1 FIX: _wiBills, _pbBills, _khataCustomers, _khataEntries bhi reset karo
     _wiBills = []; _pbBills = [];
     _khataCustomers = []; _khataEntries = {};
     savedItems = [];
     _savedAddresses = []; // ✅ BUG FIX v42: Address book in-memory reset
-    // 🔒 FIX Bug1: _coupons, _reviews, _adminNotifs bhi in-memory reset karo (Supabase delete kaafi nahi)
+    // 🔒 FIX Bug1: _coupons, _reviews, _adminNotifs bhi in-memory reset karo
     if(typeof _coupons !== 'undefined') _coupons = [];
     if(typeof _reviews !== 'undefined') _reviews = [];
     if(typeof _adminNotifs !== 'undefined') _adminNotifs = [];
@@ -10254,6 +10259,7 @@ async function clearAllTestData() {
     b2bProducts.forEach(p => { p.stockQty = 0; p.inStock = false; });
 
     // 3. Supabase tables delete
+    // 🔧 FIX v43.2 BUG#3: seller_products bhi clear karo
     const tablesToClear = [
         db.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('users').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
@@ -10262,21 +10268,12 @@ async function clearAllTestData() {
         db.from('dealership_enquiries').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('sellers').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('distributors').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        db.from('seller_products').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         // 🔧 FIX v41.2: coupons table ka PK 'code' hai, UUID 'id' nahi — neq('code','') use karo
         db.from('coupons').delete().neq('code', ''),
     ];
 
     // 4. Settings mein se test keys delete karo
-    // ✅ BUG FIX: Khata entries bhi delete karo (orphan data fix)
-    const khataCustomersForReset = khataGetAll();
-    const khataEntryDeleteOps = khataCustomersForReset.map(c =>
-        db.from('settings').delete().eq('key', 'nexdrop_khata_entries_' + c.id)
-    );
-    // Also clear localStorage entries
-    khataCustomersForReset.forEach(c => {
-        /* khata entries cleared in Supabase */
-    });
-
     const settingsKeysToDelete = [
         'nexdrop_orders', 'nexdrop_users', 'nexdrop_bulk',
         'nexdrop_bills', 'nexdrop_dealership', 'nexdrop_bill_counter',
@@ -10284,9 +10281,11 @@ async function clearAllTestData() {
         'nexdrop_pb_bills', 'nexdrop_reviews', 'nexdrop_admin_notifs',
         'nexdrop_khata_customers',
     ];
-    // ✅ BUG FIX v42: Per-user dynamic keys bhi delete karo (addresses, carts, saved items, read IDs)
-    // Users array se har user ka email leke unke per-user keys delete karo
-    const userEmailsForReset = (users || []).map(u => u.email).filter(Boolean);
+
+    // 🔧 FIX v43.2 BUG#2: khata entries — ilike pattern se saare delete karo (per-ID nahi)
+    const khataEntriesDeleteOp = db.from('settings').delete().ilike('key', 'nexdrop_khata_entries_%');
+
+    // 🔧 FIX v43.2 BUG#1: Per-user keys — pehle collect kiye emails use karo (ab empty nahi hoga)
     const perUserDeleteOps = [];
     userEmailsForReset.forEach(function(email) {
         perUserDeleteOps.push(db.from('settings').delete().eq('key', 'nexdrop_addr_' + email));
@@ -10295,22 +10294,68 @@ async function clearAllTestData() {
         perUserDeleteOps.push(db.from('settings').delete().eq('key', 'saved_' + email));
         perUserDeleteOps.push(db.from('settings').delete().eq('key', 'wishlist_' + email));
         perUserDeleteOps.push(db.from('settings').delete().eq('key', 'user_read_ids_' + email));
+        perUserDeleteOps.push(db.from('settings').delete().eq('key', 'nexdrop_coupon_' + email));
     });
     const settingsDeletes = [
         ...settingsKeysToDelete.map(k => db.from('settings').delete().eq('key', k)),
-        ...khataEntryDeleteOps,
-        ...perUserDeleteOps // ✅ per-user keys
+        khataEntriesDeleteOp,
+        ...perUserDeleteOps
     ];
 
+    const tableNames = ['orders','users','bills','bulk_enquiries','dealership_enquiries','sellers','distributors','seller_products','coupons'];
     try {
-        await Promise.all([...tablesToClear, ...settingsDeletes]);
+        const results = await Promise.all([...tablesToClear, ...settingsDeletes]);
+        // Koi Supabase delete fail hua to log + toast karo
+        let failedTables = [];
+        results.slice(0, tableNames.length).forEach(function(r, i) {
+            if(r && r.error) { console.warn('Reset: ' + tableNames[i] + ' delete error:', r.error.message); failedTables.push(tableNames[i]); }
+        });
+        if(failedTables.length > 0) showToast('⚠️ Delete failed: ' + failedTables.join(', ') + ' — Supabase RLS check karo!', '#e65100');
     } catch(e) {
-        console.log('Reset Supabase error:', e.message);
+        console.warn('Reset Supabase error:', e.message);
+        showToast('⚠️ Supabase reset error: ' + e.message, '#e65100');
     }
 
-    // 5. Products/B2B stock Supabase mein update karo
-    saveProducts();
-    saveB2B();
+    // 5. Products/B2B stock Supabase mein AWAIT karke update karo
+    // 🔧 FIX v43.2: saveProducts()/saveB2B() fire-and-forget tha — reload pe old stock wapas aata tha
+    // Ab inline await use karo taaki Supabase confirm kare pehle user reload kare
+    try {
+        if(products && products.length > 0) {
+            const zeroRows = products.map(p => ({
+                ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                name: p.name, price: p.price, mrp: p.mrp || p.price, category: p.category,
+                description: p.desc || p.description || '', image_type: p.imageType,
+                image_value: (p.imageValue && p.imageValue.length > 500000) ? '🌾' : (p.imageValue || ''),
+                in_stock: false, stock_qty: 0, discount: p.discount || 0,
+                hsn_code: p.hsnCode || '', gst_slab: p.gstSlab || 0,
+                cod_allowed: p.codAllowed !== false, courier_charge: p.courierCharge || 0,
+                highlights: p.highlights || [], extra_images: p.extraImages || [],
+                price_unit: p.priceUnit || '', rating: p.rating || 0, rating_count: p.ratingCount || 0
+            }));
+            const pr = await db.from('products').upsert(zeroRows, { onConflict: 'id' });
+            if(pr && pr.error) console.warn('Products stock zero error:', pr.error.message);
+            else console.log('✅ Products stock zeroed in Supabase:', zeroRows.length, 'rows');
+        }
+        if(b2bProducts && b2bProducts.length > 0) {
+            const b2bZeroRows = b2bProducts.map(p => ({
+                ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                name: p.name, price: p.price, mrp: p.mrp || p.price, category: p.category,
+                description: p.desc || p.description || '', image_type: p.imageType,
+                image_value: (p.imageValue && p.imageValue.length > 500000) ? '🌾' : (p.imageValue || ''),
+                in_stock: false, stock_qty: 0, discount: p.discount || 0,
+                hsn_code: p.hsnCode || '', gst_slab: p.gstSlab || 0,
+                cod_allowed: p.codAllowed !== false, courier_charge: p.courierCharge || 0,
+                highlights: p.highlights || [], extra_images: p.extraImages || [],
+                price_unit: p.priceUnit || ''
+            }));
+            await db.from('products').upsert(b2bZeroRows, { onConflict: 'id' });
+            await db.from('settings').upsert({ key: 'nexdrop_b2b', value: JSON.stringify(b2bProducts) }, { onConflict: 'key' });
+            console.log('✅ B2B stock zeroed in Supabase');
+        }
+    } catch(se) { console.warn('Stock zero Supabase error:', se.message); }
+    // UI update (in-memory already zeroed above)
+    updateStats(); displayProducts();
+    if(typeof displayHomeProducts === 'function') displayHomeProducts();
 
     // ✅ v40.1: _origLSRemove calls removed — no-op functions hain (localStorage disabled hai)
 
@@ -20798,6 +20843,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 console.log('✅ [v41.4] ALL AUDIT FIXES: [C-1] uploadB2BPhoto MIME check; [C-2] uploadExtraPhoto MIME+onerror+validCount; [M-1] sbSaveBill order_id coercion; [M-2] downloadOrderText XSS (textarea.value); [L-1] sbSaveProduct rating+rating_count; [L-4] freeMin null fallback; [S-1] distLogin dual-hash+auto-migrate; [S-2] distRegister hashPassword+email-validation; [S-3] Seller full session restore from Supabase');
 console.log('✅ [v43.0] STOCK+PRODUCT AUDIT FIXES: [C-1] saveProducts rating/rating_count data loss fixed; [C-2] adjustStockV2 phantom ledger entries removed — ledger ab actual save pe banta hai; [C-3] addProduct client ID collision fixed — temp negative ID+sbLoadProducts sync; [M-1] saveSingleProduct+saveAllProducts admin auth check added; [M-2] quickAddStock/quickSetStock/quickAddB2BStock/quickSetB2BStock ledger entries added; [M-3] toggleStock/toggleB2BStock ledger entries added; [M-4] saveAllStock ledger entries added; [M-5] saveCustomCategoryStock ledger entries added; [L-1] addProduct form clear after submit; [L-2] mrp field explicitly set in addProduct; [L-3] price validation in saveSingleProduct+addProduct; [L-4] loadStockManager async+reorder cache pre-load race condition fixed; [L-5] saveStockCategory legacy ledger entries added');
+console.log('✅ [v43.2] RESET BUG FIXES: BUG#1 userEmailsForReset — users=[] clear hone ke BAAD collect ho raha tha, per-user Supabase keys (cart/addr/wishlist) kabhi delete nahi hote the — FIXED: emails pehle collect karo; BUG#2 khataCustomersForReset — _khataCustomers=[] ke baad khataGetAll() empty return karta tha, entries kabhi delete nahi hoti thi — FIXED: ilike pattern delete + pehle snapshot; BUG#3 seller_products table reset mein missing tha — FIXED: tablesToClear mein add kiya; BUG#4 nexdrop_coupon_email per-user key bhi added in perUserDeleteOps; BUG#5 RACE CONDITION: saveProducts()/saveB2B() fire-and-forget the — user reload karta tha to Supabase mein old stock hota tha, wapas aa jaata tha — FIXED: inline await upsert from clearAllTestData; per-table delete error toast added');
 console.log('✅ [v43.1] COUPON SYSTEM AUDIT FIXES: [C-1] initSupabase coupon mapping maxDiscount missing — percent cap kaam nahi karta tha; [C-2] saveCoupons empty-array early return documented (clearAllTestData handles Supabase delete); [M-1] applyCoupon perUserLimit — stale in-memory orders se fresh Supabase query (race condition/multi-tab bypass fix); [M-2] addCoupon percent>100 validation; [M-3] getCouponDiscount auto-remove — couponInput field + sessionStorage clear; [M-4] applyCoupon brute-force protection (5 tries → 1 min lockout); [M-5] activeCoupon sessionStorage persist — apply/remove/auto-remove + sbLoadUserCart restore on login/refresh; [L-1] addCoupon past expiry date rejected; [L-2] renderCouponHistory free_shipping shows "Free Ship" not ₹0; [L-3] applyCoupon fresh mapping mein createdAt added; [L-4] loadCouponsList async + fresh Supabase load');
 console.log('✅ [v44.0] ZERO BROWSER STORAGE: All sessionStorage → _MemStore (in-memory, tab-scoped) or Supabase. [1] nexdrop_current_user sessionStorage → cookie (_ndrop_usr, email-only) + fresh Supabase users load on restore; [2] _nexdrop_activeCoupon sessionStorage → Supabase key nexdrop_coupon_{email} — apply/remove/auto-remove/orderPlace/logout all sync Supabase; [3] _adm_st admin token → _MemStore; [4] nexdrop_seller_session → _MemStore; [5] nexdrop_dist_session → _MemStore; [6] brute-force counters (ulg/adlg/slg/dlg) → _MemStore (intentionally tab-scoped); [7] rls_dismissed → _MemStore. Zero localStorage. Zero sessionStorage calls remain.');
 console.log('✅ [v44.2] FINAL DEEP AUDIT: [C-1] buyNow sbSaveOrder await added; [C-2] Shipped WA double-91 fixed (.replace(^91,"")); [C-3] addB2BProduct temp negative ID (was Math.max collision); [M-1] deleteOrder sbDeleteOrder — confirmed await; [M-2] sellerSubmitProduct MRP < Price validation; [M-3] genOrderId crypto.getRandomValues (collision-safe); [M-4] sensitive email/phone removed from console.log; [M-5] sbSaveUser block/unblock — error rollback; [M-6] saveUserPassword .single()→.maybeSingle() + blank-oldpass guard; [L-3] distAddToCart max qty 10000 cap; [L-4] exportReportsCSV fresh sbLoadBills before export; markBillPaid sbSaveOrder catch added');
