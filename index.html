@@ -274,7 +274,9 @@ function _setCookie(name, value, days) {
     try {
         let expires = '';
         if(days) { let d = new Date(); d.setTime(d.getTime() + days*24*60*60*1000); expires = '; expires=' + d.toUTCString(); }
-        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/; SameSite=Strict';
+        // ✅ FIX: Secure flag add kiya — HTTPS (GitHub Pages) pe mobile browsers require karte hain
+        let secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/; SameSite=Lax' + secure;
     } catch(e) { console.log('_setCookie error:', e.message); }
 }
 function _getCookie(name) {
@@ -284,7 +286,10 @@ function _getCookie(name) {
     } catch(e) { return null; }
 }
 function _deleteCookie(name) {
-    try { document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Strict'; } catch(e) {}
+    try { 
+        let secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax' + secure; 
+    } catch(e) {}
 }
 
 // ✅ Cold-start hydration: page load pe Supabase ki settings table se
@@ -1182,12 +1187,14 @@ const _adminVault = (function() {
     // 🔒 FIX: 30-min idle auto-logout
     const IDLE_DURATION = 30 * 60 * 1000; // 30 minutes
     let _idleTimer = null;
+    const COOKIE_NAME = '_adm_tk';
     function _resetIdle() {
         clearTimeout(_idleTimer);
         _idleTimer = setTimeout(function() {
             if(_sessionToken) {
                 _sessionToken = null; _tokenExpiry = 0;
                 try { _MemStore.removeItem('_adm_st'); } catch(e) {}
+                _deleteCookie(COOKIE_NAME);
                 if(typeof showToast === 'function') showToast('⏰ Admin session timeout — 30 min idle. Please login again.', '#c62828');
                 if(typeof closeAdminPanel === 'function') closeAdminPanel();
             }
@@ -1201,7 +1208,6 @@ const _adminVault = (function() {
     return {
         // Session token set karo (only after successful login verification)
         setSession: function() {
-            // 🔒 FIX: Math.random() insecure tha — crypto.getRandomValues() use karo
             let token;
             if(crypto.randomUUID) {
                 token = crypto.randomUUID();
@@ -1212,22 +1218,28 @@ const _adminVault = (function() {
             }
             _sessionToken = token;
             _tokenExpiry = Date.now() + TOKEN_DURATION;
+            // ✅ FIX: Cookie mein store karo — _MemStore pe in-memory tha, refresh pe reset hota tha
+            try { _setCookie(COOKIE_NAME, _sessionToken + '|' + _tokenExpiry, 0.17); } catch(e) {} // 0.17 days = 4 hours
             try { _MemStore.setItem('_adm_st', _sessionToken + '|' + _tokenExpiry); } catch(e) {}
-            _resetIdle(); // 🔒 FIX: Idle timer start on login
+            _resetIdle();
         },
         // Token valid hai?
         isLoggedIn: function() {
             if (_sessionToken && Date.now() < _tokenExpiry) return true;
-            // sessionStorage se restore try karo (page refresh)
+            // ✅ FIX: Cookie se restore karo (page refresh survive karta hai)
             try {
-                const saved = _MemStore.getItem('_adm_st');
-                if (saved) {
-                    const [tok, exp] = saved.split('|');
+                const cookieVal = _getCookie(COOKIE_NAME) || _MemStore.getItem('_adm_st');
+                if (cookieVal) {
+                    const [tok, exp] = cookieVal.split('|');
                     if (tok && Date.now() < parseInt(exp)) {
                         _sessionToken = tok;
                         _tokenExpiry = parseInt(exp);
-                        _resetIdle(); // 🔒 FIX: Restore pe bhi idle timer start
+                        _resetIdle();
                         return true;
+                    } else {
+                        // Expired — clean up
+                        _deleteCookie(COOKIE_NAME);
+                        try { _MemStore.removeItem('_adm_st'); } catch(e) {}
                     }
                 }
             } catch(e) {}
@@ -1238,6 +1250,7 @@ const _adminVault = (function() {
             _sessionToken = null;
             _tokenExpiry = 0;
             clearTimeout(_idleTimer);
+            _deleteCookie(COOKIE_NAME);
             try { _MemStore.removeItem('_adm_st'); } catch(e) {}
         }
     };
@@ -5789,23 +5802,24 @@ var defaultProductImages = {
 function loadData() {
     // ✅ v40: Supabase se load karo (async) — no localStorage fallback
     initSupabase().then(function() {
-        // ✅ v31: initSupabase complete — products bhi load ho gaye, ab categories refresh karo
-        // Small delay taaki DOM bhi ready ho
         setTimeout(function() {
             if(typeof updateHeroCategoryCount === 'function') updateHeroCategoryCount();
             if(typeof populateCategoryDropdowns === 'function') populateCategoryDropdowns();
             if(typeof loadCategoryTagsList === 'function') loadCategoryTagsList();
         }, 100);
+        // ✅ FIX: Page refresh pe admin session cookie se restore karo aur panel auto-open karo
+        // Mobile pe Supabase thoda slow hota hai — 500ms delay enough hoga
+        setTimeout(function() {
+            if(_adminVault.isLoggedIn() && typeof openAdminPanel === 'function') {
+                openAdminPanel();
+            }
+        }, 500);
     }).catch(function() {
-        // products loaded from Supabase in-memory
-        // orders already in-memory
-        // users loaded from Supabase in-memory // 🔒 FIX B2: passwords strip karo
-        // bulkEnquiries already in-memory
-        // b2bProducts already in-memory from Supabase
-        // settings loaded from Supabase in loadData()
-        // currentUser is in-memory (set during login)
         updateStats();
         setTimeout(function() { if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay(); }, 100);
+        setTimeout(function() {
+            if(_adminVault.isLoggedIn() && typeof openAdminPanel === 'function') openAdminPanel();
+        }, 500);
     });
 }
 // ✅ FIX: confirm() hata diya — 2-step toast
@@ -13359,6 +13373,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ---- 9. IMAGE LAZY LOADING (IntersectionObserver — NO localStorage) ----
 document.addEventListener('DOMContentLoaded', function() {
+    // ✅ FIX: Admin session cookie se early restore — mobile pe initSupabase slow hota hai
+    // Agar cookie valid hai toh 1 second baad panel open karo (Supabase load hone ka wait)
+    setTimeout(function() {
+        if(typeof _adminVault !== 'undefined' && _adminVault.isLoggedIn() &&
+           typeof openAdminPanel === 'function' &&
+           !document.getElementById('adminPanel')?.classList.contains('active')) {
+            openAdminPanel();
+        }
+    }, 1000);
     // IntersectionObserver: data-src images load when visible
     const imgObserver = new IntersectionObserver(function(entries) {
         entries.forEach(entry => {
