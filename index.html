@@ -77,7 +77,10 @@ const db = (function() {
     QueryBuilder.prototype.in = function(col, vals) { this._filters.push(col + '=in.(' + vals.join(',') + ')'); return this; };
     QueryBuilder.prototype.is = function(col, val) { this._filters.push(col + '=is.' + val); return this; };
     QueryBuilder.prototype.order = function(col, opts) {
-        this._order = col + (opts && opts.ascending === false ? '.desc' : '.asc');
+        // ✅ FIX v44.3-B: Multiple .order() calls support — pehle wala overwrite nahi hoga
+        // PostgREST accepts: &order=sort_order.asc,id.asc
+        let part = col + (opts && opts.ascending === false ? '.desc' : '.asc');
+        this._order = this._order ? this._order + ',' + part : part;
         return this;
     };
     QueryBuilder.prototype.limit = function(n) { this._limit = n; return this; };
@@ -346,7 +349,7 @@ async function sbLoadProducts() {
     try {
         // ✅ PHASE 1: Metadata without heavy image_value — fast render
         const { data, error } = await sbSafeQuery(() =>
-            db.from('products').select('id,name,price,mrp,description,image_type,in_stock,stock_qty,discount,hsn_code,gst_slab,cod_allowed,courier_charge,highlights,extra_images,category,rating,rating_count,price_unit').order('id')
+            db.from('products').select('id,name,price,mrp,description,image_type,in_stock,stock_qty,discount,hsn_code,gst_slab,cod_allowed,courier_charge,highlights,extra_images,category,rating,rating_count,price_unit,sort_order').order('sort_order').order('id') // ✅ FIX v44.3: sort_order column se custom order
         );
         if(error) throw new Error(error.message);
         if(data && data.length > 0) {
@@ -371,7 +374,8 @@ async function sbLoadProducts() {
                 category: p.category || '',
                 rating: p.rating || 4.5,
                 ratingCount: p.rating_count || 0,
-                priceUnit: p.price_unit || ''
+                priceUnit: p.price_unit || '',
+                sortOrder: p.sort_order !== null && p.sort_order !== undefined ? p.sort_order : p.id // ✅ FIX v44.3: sort_order fallback to id
             }));
             console.log('✅ ' + products.length + ' products (metadata) loaded fast!');
             // PHASE 1 render — products with emoji/placeholder show immediately
@@ -453,7 +457,9 @@ async function sbSaveProduct(p) {
             price_unit: p.priceUnit || '',
             // ✅ FIX L-1: rating aur rating_count INSERT mein include karo (save nahi ho raha tha)
             rating: p.rating || 0,
-            rating_count: p.ratingCount || 0
+            rating_count: p.ratingCount || 0,
+            // ✅ FIX v44.3-B: sort_order sbSaveProduct mein missing tha
+            sort_order: p.sortOrder !== undefined ? p.sortOrder : (p.id > 0 ? p.id : 0)
         };
         if(row.image_value && row.image_value.length > 500000) {
             row.image_value = '🌾'; row.image_type = 'emoji';
@@ -512,6 +518,9 @@ async function sbLoadOrders() {
                 customerStateCode: o.customer_state_code || '',
                 // ✅ FIX Bug2: customerStateName load karo Supabase se
                 customerStateName: o.customer_state_name || '',
+                // ✅ FIX BUG-O1: cancelRequested/returnRequested restore karo
+                cancelRequested: o.cancel_requested || false,
+                returnRequested: o.return_requested || false,
                 date: o.created_at
             }));
         }
@@ -545,7 +554,10 @@ async function sbSaveOrder(order) {
             courier: order.courier || 0,
             customer_gstin: order.customerGstin || '',
             customer_state_code: order.customerStateCode || '',
-            customer_state_name: order.customerStateName || ''
+            customer_state_name: order.customerStateName || '',
+            // ✅ FIX BUG-O1: cancelRequested/returnRequested Supabase mein persist karo
+            cancel_requested: order.cancelRequested || false,
+            return_requested: order.returnRequested || false
         };
         // ✅ FIX v36.7: upsert use karo — same ID pe update, naya ID pe insert
         const { data, error } = await db.from('orders').upsert([row], { onConflict: 'id' }).select();
@@ -1183,7 +1195,7 @@ function genOrderId() {
 const _adminVault = (function() {
     let _sessionToken = null;
     let _tokenExpiry = 0;
-    const TOKEN_DURATION = 4 * 60 * 60 * 1000; // 4 hours max
+    const TOKEN_DURATION = 24 * 60 * 60 * 1000; // ✅ FIX v44.3: 4hr → 24hr — refresh pe logout nahi hoga
     // 🔒 FIX: 30-min idle auto-logout
     const IDLE_DURATION = 30 * 60 * 1000; // 30 minutes
     let _idleTimer = null;
@@ -1219,7 +1231,7 @@ const _adminVault = (function() {
             _sessionToken = token;
             _tokenExpiry = Date.now() + TOKEN_DURATION;
             // ✅ FIX: Cookie mein store karo — _MemStore pe in-memory tha, refresh pe reset hota tha
-            try { _setCookie(COOKIE_NAME, _sessionToken + '|' + _tokenExpiry, 0.17); } catch(e) {} // 0.17 days = 4 hours
+            try { _setCookie(COOKIE_NAME, _sessionToken + '|' + _tokenExpiry, 1); } catch(e) {} // ✅ FIX v44.3: 1 day — TOKEN_DURATION ke saath sync
             try { _MemStore.setItem('_adm_st', _sessionToken + '|' + _tokenExpiry); } catch(e) {}
             _resetIdle();
         },
@@ -1532,6 +1544,12 @@ function _stripPasswords(usersArr) {
     body.dark-mode .user-btn { background: #1e2e2a; color: #c49a6c !important; }
     body.dark-mode .hp-tab { background: #1e2e2a; border-color: #3a4a44; color: #a89880; }
     body.dark-mode .hp-tab.hp-tab-active { background: #2c5a4a; color: white; }
+    /* ✅ Nav category links styling */
+    .nav-cat-link { display:block; padding:0.6rem 1.5rem 0.6rem 2rem !important; font-size:0.85rem !important; color:#2c3e2f !important; border-bottom:1px solid #f5f0ea; font-weight:500; transition:all 0.2s; }
+    .nav-cat-link:hover { background:#f5f0ea !important; color:#2c5a4a !important; }
+    .nav-cat-link.nav-cat-active { color:#2c5a4a !important; font-weight:700 !important; background:#f0f7f4 !important; }
+    body.dark-mode .nav-cat-link { color:#c8b89a !important; border-color:#1e2e2a; }
+    body.dark-mode .nav-cat-link.nav-cat-active { background:#1e2e2a !important; }
 
     /* Dark mode toggle button */
     .dark-toggle {
@@ -1899,6 +1917,8 @@ img { max-width: 100%; height: auto; }
     .nav-links a { font-size: 0.82rem; }
     .admin-btn, .user-btn { font-size: 0.75rem; padding: 0.3rem 0.75rem; }
     .logo-text { font-size: 1.05rem; }
+    /* ✅ Desktop: 4 products per row */
+    .product-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 1.4rem !important; }
 }
 
 /* --- NAVBAR TABLET (769px–1024px) --- */
@@ -1906,6 +1926,8 @@ img { max-width: 100%; height: auto; }
     .navbar { padding: 0.7rem 1rem; }
     .nav-links a { font-size: 0.8rem; }
     .admin-btn, .user-btn { font-size: 0.72rem; padding: 0.28rem 0.6rem; }
+    /* ✅ Tablet: 3 products per row */
+    .product-grid { grid-template-columns: repeat(3, 1fr) !important; gap: 1.1rem !important; }
 }
 
 /* --- MOBILE NAVBAR FIX --- */
@@ -2234,6 +2256,12 @@ body.dark-mode .nav-links { background: #121a18 !important; }
             <a href="#" onclick="navGo(scrollToB2B); return false;">Wholesale</a>
             <a href="#" onclick="navGo(scrollToAbout); return false;">About Us</a>
             <a href="#" onclick="navGo(scrollToContact); return false;">Contact</a>
+            <!-- ✅ NAV CATEGORIES: Dynamic product categories in nav -->
+            <div id="navCatSection" style="display:none;">
+                <div style="padding:0.5rem 1.5rem 0.3rem;font-size:0.72rem;font-weight:700;color:#c49a6c;text-transform:uppercase;letter-spacing:0.08em;border-top:1px solid #f5f0ea;">🗂️ Categories</div>
+                <a href="#" id="navCat_all" class="nav-cat-link nav-cat-active" onclick="navFilterCat('all');return false;">🛍️ All Products</a>
+                <div id="navCatDynamic"></div>
+            </div>
             <a href="#" onclick="openDealershipModal(); closeNav(); return false;" style="color:#c49a6c;font-weight:700;">🤝 Dealership / Distributor</a>
             <a href="#" onclick="openDistributorLogin(); closeNav(); return false;" style="color:#fff;font-weight:700;background:linear-gradient(135deg,#2c5a4a,#c49a6c);padding:4px 12px;border-radius:20px;">🏭 Distributor Login</a>
             <a href="#" onclick="openSellerLogin(); closeNav(); return false;" style="color:#fff;font-weight:700;background:linear-gradient(135deg,#1a4a8a,#e91e63);padding:4px 12px;border-radius:20px;">🏪 Seller Login</a>
@@ -2337,7 +2365,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <div class="product-search-wrap">
         <input type="text" id="homeProductSearch" class="product-search-input" placeholder="🔍 Search makhana, tea &amp; more..." oninput="searchHomeProducts(this.value)" aria-label="Search products">
     </div>
-    <div id="hpTabsContainer" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.2rem;justify-content:center;">
+    <div id="hpTabsContainer" style="display:none;">
         <button id="hpTab_all" class="hp-tab hp-tab-active" onclick="filterHomeProducts('all')">🛍️ All Products</button>
         
         
@@ -2448,14 +2476,38 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         <div class="about-section-block"><h3>👁️ Our Vision</h3><p>To become <strong>India's #1 FMCG & Grocery B2B Marketplace</strong> — a trusted platform connecting Bihar's finest farms with buyers and sellers across the nation, empowering businesses of every size with quality products and seamless supply.</p></div>
 
         <div class="about-section-block"><h3>🏭 What We Offer</h3>
-            <ul style="margin-left:1.5rem;line-height:2;color:#4a4a4a;">
-                <li>🌾 <strong>Retail Makhana</strong> — 7 Suta, 6 Suta, 5 Suta, Mix Grade packs for home buyers</li>
-                <li>📦 <strong>Wholesale Makhana</strong> — Bulk supply (min 10 KG) for distributors & retailers</li>
-                <li>☕ <strong>Retail Tea</strong> — Darjeeling, Assam CTC, Green, Herbal packs for home use</li>
-                <li>🏭 <strong>Wholesale Tea</strong> — Bulk tea supply for hotels, cafes, offices & resellers</li>
-                <li>🏷️ <strong>White-Label / Custom Branding</strong> — Launch your own brand with our products</li>
-                <li>🤝 <strong>Dealership & Distributor Program</strong> — Become a Nexdrop partner</li>
-            </ul>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-top:0.5rem;">
+                <div style="background:linear-gradient(135deg,#f0f7f4,#e8f5e9);border-radius:14px;padding:1rem 0.9rem;border-left:4px solid #2c5a4a;box-shadow:0 2px 8px rgba(44,90,74,0.08);">
+                    <div style="font-size:1.5rem;margin-bottom:0.3rem;">🌾</div>
+                    <div style="font-weight:700;color:#2c5a4a;font-size:0.88rem;margin-bottom:0.25rem;">Retail Makhana</div>
+                    <div style="font-size:0.73rem;color:#5a7a6a;line-height:1.4;">7 Suta, 6 Suta, 5 Suta, Mix Grade packs for home buyers</div>
+                </div>
+                <div style="background:linear-gradient(135deg,#fff8f0,#fff3e0);border-radius:14px;padding:1rem 0.9rem;border-left:4px solid #c49a6c;box-shadow:0 2px 8px rgba(196,154,108,0.08);">
+                    <div style="font-size:1.5rem;margin-bottom:0.3rem;">📦</div>
+                    <div style="font-weight:700;color:#a0700a;font-size:0.88rem;margin-bottom:0.25rem;">Wholesale Makhana</div>
+                    <div style="font-size:0.73rem;color:#8a6a3a;line-height:1.4;">Bulk supply (min 10 KG) for distributors &amp; retailers</div>
+                </div>
+                <div style="background:linear-gradient(135deg,#f0f4ff,#e8eeff);border-radius:14px;padding:1rem 0.9rem;border-left:4px solid #5c6bc0;box-shadow:0 2px 8px rgba(92,107,192,0.08);">
+                    <div style="font-size:1.5rem;margin-bottom:0.3rem;">☕</div>
+                    <div style="font-weight:700;color:#3949ab;font-size:0.88rem;margin-bottom:0.25rem;">Retail Tea</div>
+                    <div style="font-size:0.73rem;color:#5a6aab;line-height:1.4;">Darjeeling, Assam CTC, Green &amp; Herbal packs for home use</div>
+                </div>
+                <div style="background:linear-gradient(135deg,#fff0f4,#ffe8ee);border-radius:14px;padding:1rem 0.9rem;border-left:4px solid #e91e63;box-shadow:0 2px 8px rgba(233,30,99,0.08);">
+                    <div style="font-size:1.5rem;margin-bottom:0.3rem;">🍵</div>
+                    <div style="font-weight:700;color:#c2185b;font-size:0.88rem;margin-bottom:0.25rem;">Wholesale Tea</div>
+                    <div style="font-size:0.73rem;color:#a0456a;line-height:1.4;">Bulk supply for hotels, cafes, offices &amp; resellers</div>
+                </div>
+                <div style="background:linear-gradient(135deg,#f5f0ff,#ede7ff);border-radius:14px;padding:1rem 0.9rem;border-left:4px solid #7c4dff;box-shadow:0 2px 8px rgba(124,77,255,0.08);">
+                    <div style="font-size:1.5rem;margin-bottom:0.3rem;">🏷️</div>
+                    <div style="font-weight:700;color:#6200ea;font-size:0.88rem;margin-bottom:0.25rem;">White-Label / Custom</div>
+                    <div style="font-size:0.73rem;color:#7c4daa;line-height:1.4;">Launch your own brand with our products</div>
+                </div>
+                <div style="background:linear-gradient(135deg,#f0fff4,#e8fdf0);border-radius:14px;padding:1rem 0.9rem;border-left:4px solid #00bfa5;box-shadow:0 2px 8px rgba(0,191,165,0.08);">
+                    <div style="font-size:1.5rem;margin-bottom:0.3rem;">🤝</div>
+                    <div style="font-weight:700;color:#00796b;font-size:0.88rem;margin-bottom:0.25rem;">Dealership Program</div>
+                    <div style="font-size:0.73rem;color:#3a8a80;line-height:1.4;">Become a Nexdrop partner &amp; grow your business</div>
+                </div>
+            </div>
         </div>
 
         <div class="about-section-block"><h3>💪 Why We Are Different</h3>
@@ -5807,19 +5859,24 @@ function loadData() {
             if(typeof populateCategoryDropdowns === 'function') populateCategoryDropdowns();
             if(typeof loadCategoryTagsList === 'function') loadCategoryTagsList();
         }, 100);
-        // ✅ FIX: Page refresh pe admin session cookie se restore karo aur panel auto-open karo
-        // Mobile pe Supabase thoda slow hota hai — 500ms delay enough hoga
-        setTimeout(function() {
+        // ✅ FIX v44.3: Retry logic — 500ms fixed timeout hata diya, ab 5 retries × 600ms
+        // Supabase slow ho ya mobile pe late load ho — dono cases handle honge
+        (function _tryRestoreAdmin(attempts) {
             if(_adminVault.isLoggedIn() && typeof openAdminPanel === 'function') {
-                openAdminPanel();
+                openAdminPanel(); return;
             }
-        }, 500);
+            if(attempts > 0) setTimeout(function() { _tryRestoreAdmin(attempts - 1); }, 600);
+        })(6);
     }).catch(function() {
         updateStats();
         setTimeout(function() { if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay(); }, 100);
-        setTimeout(function() {
-            if(_adminVault.isLoggedIn() && typeof openAdminPanel === 'function') openAdminPanel();
-        }, 500);
+        // ✅ FIX v44.3: catch block mein bhi retry
+        (function _tryRestoreAdminCatch(attempts) {
+            if(_adminVault.isLoggedIn() && typeof openAdminPanel === 'function') {
+                openAdminPanel(); return;
+            }
+            if(attempts > 0) setTimeout(function() { _tryRestoreAdminCatch(attempts - 1); }, 600);
+        })(6);
     });
 }
 // ✅ FIX: confirm() hata diya — 2-step toast
@@ -5867,7 +5924,9 @@ function saveProducts() {
                 price_unit: p.priceUnit || '',
                 // ✅ FIX C-1: rating aur rating_count bulk upsert mein missing the — har save pe Supabase mein 0 ho jaata tha (data loss)
                 rating: p.rating || 0,
-                rating_count: p.ratingCount || 0
+                rating_count: p.ratingCount || 0,
+                // ✅ FIX v44.3: sort_order save karo — product order persist hoga
+                sort_order: p.sortOrder !== undefined ? p.sortOrder : p.id
             }));
             db.from('products').upsert(rows, { onConflict: 'id' }).then(function(r) {
                 if(r && r.error) console.log('saveProducts bulk upsert error:', r.error.message);
@@ -5902,7 +5961,10 @@ function saveOrders() {
                 courier: order.courier || 0,
                 customer_gstin: order.customerGstin || '',
                 customer_state_code: order.customerStateCode || '',
-                customer_state_name: order.customerStateName || ''
+                customer_state_name: order.customerStateName || '',
+                // ✅ FIX BUG-O4: Bulk upsert mein bhi cancel/return flags persist karo
+                cancel_requested: order.cancelRequested || false,
+                return_requested: order.returnRequested || false
             }));
             db.from('orders').upsert(rows, { onConflict: 'id' }).then(function(r) {
                 if(r && r.error) console.log('saveOrders bulk upsert error:', r.error.message);
@@ -5969,7 +6031,10 @@ function saveB2B() {
                 courier_charge: p.courierCharge || 0,
                 highlights: p.highlights || [],
                 extra_images: p.extraImages || [],
-                price_unit: p.priceUnit || ''
+                price_unit: p.priceUnit || '',
+                // ✅ FIX BUG-S2: rating/rating_count missing the — saveB2B pe data loss fix
+                rating: p.rating || 0,
+                rating_count: p.ratingCount || 0
             }));
             db.from('products').upsert(rows, { onConflict: 'id' }).then(function(r) {
                 if(r && r.error) console.log('saveB2B bulk upsert error:', r.error.message);
@@ -8400,7 +8465,12 @@ function userLogout() {
     savedItems = [];
     cart = []; activeCoupon = null;
     if(typeof updateCartCount === 'function') updateCartCount();
-    currentUser = null; saveCurrentUser(); closeUserPanel(); location.reload();
+    currentUser = null; saveCurrentUser(); closeUserPanel();
+    // ✅ FIX v44.3-C: location.reload() admin session bhi wipe kar deta tha (cookie tab-shared hoti hai)
+    // Sirf user state clear karo + UI refresh karo
+    if(typeof displayProducts==='function') displayProducts();
+    if(typeof updateCartCount==='function') updateCartCount();
+    if(typeof renderCart==='function') renderCart();
 }
 function openEditProfile() {
     if(!currentUser) return;
@@ -8736,7 +8806,8 @@ async function openAdminPanel() {
         return;
     }
     document.getElementById('adminPanel').classList.add('active');
-    loadAdminProducts(); loadAdminOrders(); loadAdminUsers();
+    loadAdminProducts(); loadAdminUsers();
+    sbLoadOrders().then(function(){ loadAdminOrders(); }); // ✅ FIX: Fresh Supabase fetch before render — stale in-memory se nahi
     loadBulkList(); loadAdminB2B(); loadSettingsForm();
     loadDealershipList(); // ✅ FIX 1: Dealership tab auto-load on panel open
     updateSellerBadge();
@@ -8798,6 +8869,10 @@ function loadAdminProducts() {
         let stockQty = p.stockQty !== undefined && p.stockQty !== null ? p.stockQty : '';
         let stockColor = stockQty === '' ? '#ddd' : stockQty === 0 ? '#ffcccc' : stockQty <= 10 ? '#fff3e0' : '#e8f5e9';
         html += `<tr>
+            <td style="text-align:center;vertical-align:middle;">
+                <button onclick="moveProduct(${p.id},'up')" title="Move Up" style="display:block;width:100%;background:#e8f5e9;border:1px solid #2c5a4a;border-radius:5px;cursor:pointer;font-size:0.75rem;padding:2px 6px;margin-bottom:3px;color:#2c5a4a;font-weight:700;">⬆️</button>
+                <button onclick="moveProduct(${p.id},'down')" title="Move Down" style="display:block;width:100%;background:#fce4ec;border:1px solid #c62828;border-radius:5px;cursor:pointer;font-size:0.75rem;padding:2px 6px;color:#c62828;font-weight:700;">⬇️</button>
+            </td>
             <td>
                 <div id="imgCell_${p.id}" style="display:flex;flex-direction:column;align-items:center;gap:4px;">
                     ${imgHtml}
@@ -8911,7 +8986,11 @@ function saveSingleProduct(id) {
     if(hl !== undefined) p.highlights = hl.split('\n').map(h=>h.trim()).filter(h=>h.length>0);
     let pu = document.getElementById(`priceunit_${id}`)?.value;
     if(pu !== undefined) p.priceUnit = pu;
+    // ✅ FIX v44.3-B: sort_order update karo — priceunit field ke baad
+    let soEl = document.getElementById('sort_order_' + id);
+    if(soEl !== null) p.sortOrder = parseInt(soEl.value) || p.sortOrder || p.id;
     saveProducts();
+    sbSaveProduct(p); // ✅ FIX v44.3-B: single product save bhi Supabase sync karo
     displayProducts();
     refreshStockDashboard();
     showToast('✅ ' + esc(p.name) + ' saved!');
@@ -9603,6 +9682,8 @@ function updateStatus(id, status) {
             if(prod && prod.stockQty !== null && prod.stockQty !== undefined) {
                 prod.stockQty += item.quantity;
                 prod.inStock = true;
+                // ✅ FIX BUG-O3: Restore pe ledger entry — audit trail complete karo
+                if(typeof _addLedgerEntry === 'function') _addLedgerEntry(prod.id, prod.name, !!item.isWholesale, 'add', item.quantity, prod.stockQty, 'Stock Restore — Order #' + String(o.id).slice(-6) + ' → ' + status);
             }
         }
         o.stockDeducted = false;
@@ -9644,6 +9725,24 @@ function deleteOrder(id) {
     var key = '_deleteOrderPending_' + id; // ← FIX: har order ka alag key
     if(window[key]) {
         window[key] = false;
+        // ✅ FIX BUG-O2: stockDeducted order delete pe stock wapas karo (inventory correct rakho)
+        var _delO = orders.find(function(o){ return o.id === id; });
+        if(_delO && _delO.stockDeducted) {
+            for(var _di = 0; _di < _delO.items.length; _di++) {
+                var _dItem = _delO.items[_di];
+                var _dProd = _dItem.isWholesale
+                    ? (b2bProducts.find(function(p){ return p.id === _dItem.productId; }) || b2bProducts.find(function(p){ return p.name === _dItem.name; }))
+                    : (products.find(function(p){ return p.id === _dItem.productId; }) || products.find(function(p){ return p.name === _dItem.name; }));
+                if(!_dProd) _dProd = products.find(function(p){ return p.id === _dItem.productId || p.name === _dItem.name; }) || b2bProducts.find(function(p){ return p.id === _dItem.productId || p.name === _dItem.name; });
+                if(_dProd && _dProd.stockQty !== null && _dProd.stockQty !== undefined) {
+                    _dProd.stockQty += _dItem.quantity;
+                    _dProd.inStock = true;
+                    if(typeof _addLedgerEntry === 'function') _addLedgerEntry(_dProd.id, _dProd.name, !!_dItem.isWholesale, 'add', _dItem.quantity, _dProd.stockQty, 'Order Deleted #' + String(id).slice(-6));
+                }
+            }
+            saveProducts(); saveB2B(); refreshStockDashboard();
+            showToast('↩️ Stock restore ho gaya (deleted order)', '#ff9800');
+        }
         // ✅ FIX M-1 FINAL: await add kiya — bina await Supabase delete fail pe in-memory se toh hata deta tha
         sbDeleteOrder(id);
         orders = orders.filter(o => o.id !== id);
@@ -9748,6 +9847,12 @@ function startAutoRefresh() {
         if(Date.now() - _adminLastInput < 10000) return;
         await sbLoadOrders();
         await sbLoadProducts();
+        // ✅ FIX v44.3-B: Auto-refresh ke baad sort_order apply karo
+        products.sort(function(a,b) {
+            let sa = a.sortOrder !== undefined ? a.sortOrder : a.id;
+            let sb2 = b.sortOrder !== undefined ? b.sortOrder : b.id;
+            return sa - sb2;
+        });
         // ✅ FIX v36: B2B settings table se refresh karo (multi-device sync)
         try {
             const { data: b2Data, error: b2Err } = await db.from('settings').select('value').eq('key', 'nexdrop_b2b').maybeSingle();
@@ -10360,6 +10465,51 @@ async function clearAllTestData() {
 
     showToast('✅ Saara test data reset ho gaya! Stock bhi zero hua.', '#2c5a4a');
 }
+// ✅ FIX v44.3: Product order — Up/Down buttons se sort_order update + Supabase save
+async function moveProduct(id, dir) {
+    // Global products array mein index dhundo
+    let idx = products.findIndex(function(p) { return p.id === id; });
+    if(idx === -1) return;
+
+    // Filter ke baad bhi global array mein swap karna hoga
+    // Pehle global order sort karo (sort_order se)
+    products.sort(function(a,b) {
+        let sa = a.sortOrder !== undefined ? a.sortOrder : a.id;
+        let sb = b.sortOrder !== undefined ? b.sortOrder : b.id;
+        return sa - sb;
+    });
+    idx = products.findIndex(function(p) { return p.id === id; });
+    let swapIdx = dir === 'up' ? idx - 1 : idx + 1;
+    if(swapIdx < 0 || swapIdx >= products.length) {
+        showToast(dir === 'up' ? '⬆️ Pehle se pehla product hai!' : '⬇️ Aakhri product hai!', '#888');
+        return;
+    }
+
+    // sort_order values swap karo
+    let tmpOrder = products[idx].sortOrder !== undefined ? products[idx].sortOrder : products[idx].id;
+    let swapOrder = products[swapIdx].sortOrder !== undefined ? products[swapIdx].sortOrder : products[swapIdx].id;
+    products[idx].sortOrder = swapOrder;
+    products[swapIdx].sortOrder = tmpOrder;
+
+    // Array mein bhi swap karo
+    let tmp = products[idx];
+    products[idx] = products[swapIdx];
+    products[swapIdx] = tmp;
+
+    // Supabase mein dono update karo
+    try {
+        await db.from('products').update({ sort_order: products[idx].sortOrder }).eq('id', products[idx].id);
+        await db.from('products').update({ sort_order: products[swapIdx].sortOrder }).eq('id', products[swapIdx].id);
+        showToast('✅ Product order saved!', '#2c5a4a');
+    } catch(e) {
+        showToast('⚠️ Order save failed: ' + (e.message || ''), '#c62828');
+    }
+
+    // UI refresh
+    loadAdminProducts();
+    displayProducts();
+}
+
 function adminLogout() {
     // 🔒 FIX #1: Session token invalidate karo
     _adminVault.invalidate();
@@ -10382,7 +10532,7 @@ function switchTab(tab) {
     document.querySelectorAll(".tab-content").forEach(t=>t.classList.remove("active"));
     let el = document.getElementById("tab-"+tab); if(el) el.classList.add("active");
     if(tab==="products") { loadAdminProducts(); if(typeof adminLoadSellerSubmissions==='function') adminLoadSellerSubmissions('pending'); }
-    if(tab==="orders") loadAdminOrders();
+    if(tab==="orders") sbLoadOrders().then(function(){ loadAdminOrders(); }); // ✅ FIX: Orders tab pe fresh Supabase fetch
     if(tab==="stock") loadStockManager();
     if(tab==="users") loadAdminUsers();
     if(tab==="bulk") loadBulkList();
@@ -11173,6 +11323,43 @@ function adminGoHome() {
 }
 // HOME PRODUCTS FILTER
 let homeProductFilter = "all";
+// ✅ Nav Categories: filter + scroll + close nav
+function navFilterCat(cat) {
+    // Update active state in nav
+    document.querySelectorAll('.nav-cat-link').forEach(function(a){ a.classList.remove('nav-cat-active'); });
+    var activeLink = cat === 'all' ? document.getElementById('navCat_all') : document.getElementById('navCat_dyn_' + cat.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,''));
+    if(activeLink) activeLink.classList.add('nav-cat-active');
+    // Apply filter and scroll
+    filterHomeProducts(cat === 'all' ? 'all' : 'dyncat:' + cat);
+    closeNav();
+    setTimeout(function(){ var el = document.getElementById('homeProductGrid'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 150);
+}
+
+// ✅ Build nav category links dynamically after products load
+function _buildNavCategories() {
+    var section = document.getElementById('navCatSection');
+    var dynDiv = document.getElementById('navCatDynamic');
+    if(!section || !dynDiv) return;
+    var cats = (window._nexdropCatsCache && window._nexdropCatsCache.length)
+        ? window._nexdropCatsCache
+        : (typeof getCategories === 'function' ? getCategories() : []);
+    if(!cats.length) { section.style.display = 'none'; return; }
+    section.style.display = 'block';
+    dynDiv.innerHTML = '';
+    cats.forEach(function(c) {
+        var lower = c.toLowerCase();
+        var emoji = lower.startsWith('wholesale') ? '📦' : lower.startsWith('retail') ? '🛒' : '🏷️';
+        var a = document.createElement('a');
+        a.href = '#';
+        var slug = c.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+        a.id = 'navCat_dyn_' + slug;
+        a.className = 'nav-cat-link';
+        a.textContent = emoji + ' ' + c;
+        a.onclick = (function(cat){ return function(){ navFilterCat(cat); return false; }; })(c);
+        dynDiv.appendChild(a);
+    });
+}
+
 window.filterHomeProducts = function filterHomeProducts(filter) {
     homeProductFilter = filter;
     document.querySelectorAll(".hp-tab").forEach(t => t.classList.remove("hp-tab-active"));
@@ -11984,6 +12171,7 @@ function exportStockCSV() {
 async function openStockLedger() {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     showToast('⏳ Loading ledger...', '#888');
+    _ledgerCache = null; // ✅ FIX BUG-S1: Har baar fresh Supabase fetch karo — stale cache nahi dikhega
     let entries = await _getLedger(); // ✅ FIX: await async Supabase fetch
     let filterVal = '';
 
@@ -16127,8 +16315,8 @@ function populateCategoryDropdowns() {
             hpContainer.appendChild(btn);
         });
     }
-
-    // ── Dynamic tabs: B2B / Wholesale section — categories list se banana (same as retail) ──
+    // ✅ Nav categories bhi update karo jab bhi products load hon
+    if(typeof _buildNavCategories === 'function') _buildNavCategories();
     let b2bContainer = document.getElementById('b2bTabsContainer');
     if(b2bContainer) {
         b2bContainer.querySelectorAll('.hp-tab:not(#b2bTab_all)').forEach(el => el.remove());
@@ -20833,6 +21021,7 @@ document.addEventListener('DOMContentLoaded', function() {
 console.log('✅ [v41.4] ALL AUDIT FIXES: [C-1] uploadB2BPhoto MIME check; [C-2] uploadExtraPhoto MIME+onerror+validCount; [M-1] sbSaveBill order_id coercion; [M-2] downloadOrderText XSS (textarea.value); [L-1] sbSaveProduct rating+rating_count; [L-4] freeMin null fallback; [S-1] distLogin dual-hash+auto-migrate; [S-2] distRegister hashPassword+email-validation; [S-3] Seller full session restore from Supabase');
 console.log('✅ [v43.0] STOCK+PRODUCT AUDIT FIXES: [C-1] saveProducts rating/rating_count data loss fixed; [C-2] adjustStockV2 phantom ledger entries removed — ledger ab actual save pe banta hai; [C-3] addProduct client ID collision fixed — temp negative ID+sbLoadProducts sync; [M-1] saveSingleProduct+saveAllProducts admin auth check added; [M-2] quickAddStock/quickSetStock/quickAddB2BStock/quickSetB2BStock ledger entries added; [M-3] toggleStock/toggleB2BStock ledger entries added; [M-4] saveAllStock ledger entries added; [M-5] saveCustomCategoryStock ledger entries added; [L-1] addProduct form clear after submit; [L-2] mrp field explicitly set in addProduct; [L-3] price validation in saveSingleProduct+addProduct; [L-4] loadStockManager async+reorder cache pre-load race condition fixed; [L-5] saveStockCategory legacy ledger entries added');
 console.log('✅ [v43.1] COUPON SYSTEM AUDIT FIXES: [C-1] initSupabase coupon mapping maxDiscount missing — percent cap kaam nahi karta tha; [C-2] saveCoupons empty-array early return documented (clearAllTestData handles Supabase delete); [M-1] applyCoupon perUserLimit — stale in-memory orders se fresh Supabase query (race condition/multi-tab bypass fix); [M-2] addCoupon percent>100 validation; [M-3] getCouponDiscount auto-remove — couponInput field + sessionStorage clear; [M-4] applyCoupon brute-force protection (5 tries → 1 min lockout); [M-5] activeCoupon sessionStorage persist — apply/remove/auto-remove + sbLoadUserCart restore on login/refresh; [L-1] addCoupon past expiry date rejected; [L-2] renderCouponHistory free_shipping shows "Free Ship" not ₹0; [L-3] applyCoupon fresh mapping mein createdAt added; [L-4] loadCouponsList async + fresh Supabase load');
+console.log('✅ [v44.3-FULL] FULL AUDIT FIXES: [A] QueryBuilder.order multiple columns support (sort_order+id chaining); [B] sbSaveProduct missing sort_order; [C] userLogout location.reload() removed — admin session preserve; [D] autoRefresh sort apply; [E] saveSingleProduct sbSaveProduct sync added; [F] TOKEN_DURATION comment fixed. PREVIOUS: [B1] Admin refresh logout — TOKEN_DURATION 4hr→24hr, cookie 0.17→1day, openAdminPanel 500ms fixed timeout→retry logic (6×600ms); [B2] Product order — sort_order column support added, moveProduct() Up/Down buttons, Supabase save. SQL: ALTER TABLE products ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0; UPDATE products SET sort_order = id WHERE sort_order IS NULL OR sort_order = 0;');
 console.log('✅ [v44.0] ZERO BROWSER STORAGE: All sessionStorage → _MemStore (in-memory, tab-scoped) or Supabase. [1] nexdrop_current_user sessionStorage → cookie (_ndrop_usr, email-only) + fresh Supabase users load on restore; [2] _nexdrop_activeCoupon sessionStorage → Supabase key nexdrop_coupon_{email} — apply/remove/auto-remove/orderPlace/logout all sync Supabase; [3] _adm_st admin token → _MemStore; [4] nexdrop_seller_session → _MemStore; [5] nexdrop_dist_session → _MemStore; [6] brute-force counters (ulg/adlg/slg/dlg) → _MemStore (intentionally tab-scoped); [7] rls_dismissed → _MemStore. Zero localStorage. Zero sessionStorage calls remain.');
 console.log('✅ [v44.2] FINAL DEEP AUDIT: [C-1] buyNow sbSaveOrder await added; [C-2] Shipped WA double-91 fixed (.replace(^91,"")); [C-3] addB2BProduct temp negative ID (was Math.max collision); [M-1] deleteOrder sbDeleteOrder — confirmed await; [M-2] sellerSubmitProduct MRP < Price validation; [M-3] genOrderId crypto.getRandomValues (collision-safe); [M-4] sensitive email/phone removed from console.log; [M-5] sbSaveUser block/unblock — error rollback; [M-6] saveUserPassword .single()→.maybeSingle() + blank-oldpass guard; [L-3] distAddToCart max qty 10000 cap; [L-4] exportReportsCSV fresh sbLoadBills before export; markBillPaid sbSaveOrder catch added');
 console.log('✅ [v41.3] Seller + Distributor Forgot Password: showSellerForgot/doSellerForgotPassword + showDistForgot/doDistForgotPassword — email+phone verify, hashPassword, Supabase update; closeSellerLogin/closeDistributorLogin reset form state');
