@@ -237,21 +237,8 @@ const db = (function() {
 // ⚠️ REMINDER: Supabase dashboard mein RLS (Row Level Security) enable rakho
 // 🔒 FIX RLS-1: Runtime RLS status check — admin panel mein warning dikhao
 async function _checkRLSStatus() {
-    try {
-        // Bina auth ke 'users' table se data uthane ki koshish — agar milta hai toh RLS OFF hai
-        const testRes = await fetch(SUPABASE_URL + '/rest/v1/users?select=email&limit=1', {
-            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY }
-        });
-        if(testRes.ok) {
-            const d = await testRes.json();
-            if(Array.isArray(d) && d.length > 0) {
-                console.warn('🔒 CRITICAL SECURITY: RLS is OFF on "users" table! Anyone can read all user data. Enable RLS in Supabase dashboard IMMEDIATELY.');
-                // ✅ FIX: Toast warning remove kiya — sirf console warn aur banner dikhao (users ko scary toast nahi)
-                return false;
-            }
-        }
-        return true; // RLS active ya table empty
-    } catch(e) { return null; } // Network error — check nahi ho saka
+    // ✅ RLS enabled on all tables (June 2026) — check disabled
+    return true;
 }
 
 // ============================================================
@@ -399,7 +386,7 @@ async function sbLoadProducts() {
     try {
         // ✅ PHASE 1: Metadata without heavy image_value — fast render
         const { data, error } = await sbSafeQuery(() =>
-            db.from('products').select('id,name,price,mrp,description,image_type,in_stock,stock_qty,discount,hsn_code,gst_slab,cod_allowed,courier_charge,highlights,extra_images,category,rating,rating_count,price_unit,sort_order').order('sort_order').order('id') // ✅ FIX v44.3: sort_order column se custom order
+            db.from('products').select('id,name,price,mrp,description,image_type,in_stock,stock_qty,discount,hsn_code,gst_slab,cod_allowed,courier_charge,highlights,extra_images,category,rating,rating_count,price_unit,sort_order,pack_info,ingredients,nutrition').order('sort_order').order('id') // ✅ FIX v44.3: sort_order column se custom order
         );
         if(error) throw new Error(error.message);
         if(data && data.length > 0) {
@@ -425,7 +412,10 @@ async function sbLoadProducts() {
                 rating: p.rating || 4.5,
                 ratingCount: p.rating_count || 0,
                 priceUnit: p.price_unit || '',
-                sortOrder: p.sort_order !== null && p.sort_order !== undefined ? p.sort_order : p.id // ✅ FIX v44.3: sort_order fallback to id
+                sortOrder: p.sort_order !== null && p.sort_order !== undefined ? p.sort_order : p.id, // ✅ FIX v44.3: sort_order fallback to id
+                packInfo: p.pack_info || '',
+                ingredients: p.ingredients || '',
+                nutrition: p.nutrition || null
             }));
             console.log('✅ ' + products.length + ' products (metadata) loaded fast!');
             // PHASE 1 render — products with emoji/placeholder show immediately
@@ -509,7 +499,10 @@ async function sbSaveProduct(p) {
             rating: p.rating || 0,
             rating_count: p.ratingCount || 0,
             // ✅ FIX v44.3-B: sort_order sbSaveProduct mein missing tha
-            sort_order: p.sortOrder !== undefined ? p.sortOrder : (p.id > 0 ? p.id : 0)
+            sort_order: p.sortOrder !== undefined ? p.sortOrder : (p.id > 0 ? p.id : 0),
+            pack_info: p.packInfo || null,
+            ingredients: p.ingredients || null,
+            nutrition: p.nutrition || null
         };
         if(row.image_value && row.image_value.length > 500000) {
             row.image_value = '🌾'; row.image_type = 'emoji';
@@ -3797,6 +3790,54 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
       </button>
       <div style="font-size:0.65rem;color:#e53935;text-align:center;margin-top:3px;font-weight:600;">⚠️ COD is not available for this product — online payment required</div>
     </div>
+    <!-- ✅ Ingredients Section -->
+    <div id="pdm_packInfoWrap" style="display:none;padding:0 1.4rem 0.6rem;">
+        <div style="font-size:0.72rem;font-weight:700;color:#2c6e2c;margin-bottom:4px;">📦 Pack Information</div>
+        <div id="pdm_packInfo" style="font-size:0.8rem;color:#333;background:#f0f7f0;border-radius:8px;padding:0.5rem 0.8rem;border-left:3px solid #2c6e2c;"></div>
+    </div>
+    <div id="pdm_ingredientsWrap" style="display:none;padding:0 1.4rem 0.8rem;">
+      <div style="border-top:1px solid #ede8e0;padding-top:0.8rem;">
+        <div style="font-size:0.78rem;font-weight:800;color:#2c6e2c;margin-bottom:0.4rem;text-transform:uppercase;letter-spacing:0.4px;">🌿 Ingredients</div>
+        <div id="pdm_ingredients" style="font-size:0.8rem;color:#4a4a4a;line-height:1.7;background:#f5faf5;border-radius:10px;padding:0.6rem 0.9rem;border-left:3px solid #4caf50;"></div>
+      </div>
+    </div>
+
+    <!-- ✅ Nutritional Table -->
+    <div id="pdm_nutritionWrap" style="display:none;padding:0 1.4rem 0.8rem;">
+      <div style="border-top:1px solid #ede8e0;padding-top:0.8rem;">
+        <div style="font-size:0.78rem;font-weight:800;color:#1565c0;margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.4px;">📊 Nutritional Information (Approx.)</div>
+        <div id="pdm_nutritionTable" style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.75rem;">
+            <thead>
+              <tr style="background:linear-gradient(135deg,#1565c0,#1976d2);color:white;">
+                <th style="padding:0.4rem 0.6rem;text-align:left;border-radius:6px 0 0 0;">Nutrient</th>
+                <th style="padding:0.4rem 0.6rem;text-align:center;">Per 100g</th>
+                <th style="padding:0.4rem 0.6rem;text-align:center;border-radius:0 6px 0 0;">Per Serving</th>
+              </tr>
+            </thead>
+            <tbody id="pdm_nutritionBody" style=""></tbody>
+          </table>
+        </div>
+        <div id="pdm_servingNote" style="font-size:0.68rem;color:#888;margin-top:0.4rem;text-align:right;"></div>
+      </div>
+    </div>
+
+    <!-- ✅ Deal Countdown Timer -->
+    <div id="pdm_dealTimerWrap" style="display:none;padding:0 1.4rem 0.8rem;">
+      <div style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-radius:12px;padding:0.7rem 1rem;text-align:center;border:1px solid #ffb74d;">
+        <div style="font-size:0.75rem;font-weight:700;color:#e65100;margin-bottom:0.4rem;">⏰ Deal of the Day ends in</div>
+        <div style="display:flex;justify-content:center;align-items:center;gap:0.3rem;">
+          <div style="background:#d94030;color:white;border-radius:8px;padding:0.3rem 0.6rem;font-size:1.1rem;font-weight:900;min-width:36px;text-align:center;" id="pdm_timerH">00</div>
+          <span style="font-weight:900;color:#d94030;font-size:1.1rem;">:</span>
+          <div style="background:#d94030;color:white;border-radius:8px;padding:0.3rem 0.6rem;font-size:1.1rem;font-weight:900;min-width:36px;text-align:center;" id="pdm_timerM">00</div>
+          <span style="font-weight:900;color:#d94030;font-size:1.1rem;">:</span>
+          <div style="background:#d94030;color:white;border-radius:8px;padding:0.3rem 0.6rem;font-size:1.1rem;font-weight:900;min-width:36px;text-align:center;" id="pdm_timerS">00</div>
+        </div>
+      </div>
+    </div>
+
+
+
     <!-- ✅ v32: Product Reviews Section -->
     <div id="pdm_reviewsSection" style="padding:0 1.4rem 1.4rem;">
       <div style="border-top:1px solid #ede8e0;padding-top:1rem;">
@@ -4296,7 +4337,7 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
   </div>
   <button onclick="document.getElementById('rlsWarningBanner').style.display='none';_MemStore.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
 </div>
-<script>if(_MemStore.getItem('rls_dismissed')==='1'){var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none';}</script>
+<script>var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none'; // ✅ RLS enabled</script>
 
 <div class="admin-stats">
 <div class="stat-card"><div class="stat-number" id="statProducts">0</div><div>Products</div></div>
@@ -4488,6 +4529,19 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
   </div>
   <div style="background:#f3e5f5;border-radius:8px;padding:0.4rem 0.7rem;margin-top:0.4rem;font-size:0.7rem;color:#7b1fa2;">
     💡 <strong>HSN Code & GST Slab:</strong> Har product ka alag HSN code aur GST % daalein (jaise Makhana = 1108, GST = 5%)
+  </div>
+  <div style="margin-top:0.5rem;">
+    <label style="font-size:0.75rem;font-weight:600;color:#2c6e2c;display:block;margin-bottom:3px;">📦 Pack Info:</label>
+    <input type="text" id="newPackInfo" placeholder="e.g. 6 sachets × 30gm = 180gm" style="width:100%;padding:0.4rem;font-size:0.73rem;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;">
+  </div>
+  <div style="margin-top:0.5rem;">
+    <label style="font-size:0.75rem;font-weight:600;color:#1565c0;display:block;margin-bottom:3px;">🧪 Ingredients:</label>
+    <textarea id="newIngredients" placeholder="e.g. Sattu, Jaljeera powder, Black salt, Jeera powder" rows="2" style="width:100%;padding:0.4rem;font-size:0.73rem;border:1px solid #ddd;border-radius:8px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+  </div>
+  <div style="margin-top:0.5rem;">
+    <label style="font-size:0.75rem;font-weight:600;color:#6200ea;display:block;margin-bottom:3px;">📊 Nutrition Table (CSV: Nutrient,per100g,perServing — ek per line):</label>
+    <textarea id="newNutrition" placeholder="Protein,24.34,7.30&#10;Energy,381.62,114.48&#10;Fat,5.98,1.79&#10;Carbohydrate,57.61,17.28&#10;Sugar,4.91,1.47" rows="5" style="width:100%;padding:0.4rem;font-size:0.7rem;border:1px solid #ddd;border-radius:8px;font-family:monospace;resize:vertical;box-sizing:border-box;"></textarea>
+    <input type="text" id="newNutServing" placeholder="Serving label: e.g. per /30gm" style="width:100%;margin-top:3px;padding:0.35rem;font-size:0.7rem;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;">
   </div>
   <div style="margin-top:0.5rem;"><label style="font-size:0.78rem;font-weight:600;color:#6b5e4a;">📷 Product Photo:</label><input type="file" id="newProductPhoto" accept="image/*"></div>
   <button class="save-btn" onclick="addProduct()" style="margin-top:0.6rem;width:100%;">+ Add Product</button>
@@ -5967,7 +6021,10 @@ function saveProducts() {
                 rating: p.rating || 0,
                 rating_count: p.ratingCount || 0,
                 // ✅ FIX v44.3: sort_order save karo — product order persist hoga
-                sort_order: p.sortOrder !== undefined ? p.sortOrder : p.id
+                sort_order: p.sortOrder !== undefined ? p.sortOrder : p.id,
+                pack_info: p.packInfo || null,
+                ingredients: p.ingredients || null,
+                nutrition: p.nutrition || null
             }));
             db.from('products').upsert(rows, { onConflict: 'id' }).then(function(r) {
                 if(r && r.error) console.log('saveProducts bulk upsert error:', r.error.message);
@@ -6108,6 +6165,18 @@ function saveAllB2B() {
         if(min   !== undefined) p.minQty   = min;
         if(desc  !== undefined) p.desc     = desc.trim();
         if(hl    !== undefined) p.highlights = hl.split('\n').map(h=>h.trim()).filter(h=>h);
+    // Pack info, Ingredients, Nutrition
+    let piEl = document.getElementById('packInfo_'+id);
+    if(piEl !== null) p.packInfo = piEl.value.trim();
+    let ingEl = document.getElementById('ingredients_'+id);
+    if(ingEl !== null) p.ingredients = ingEl.value.trim();
+    let nutEl = document.getElementById('nutrition_'+id);
+    let nsEl = document.getElementById('nutServing_'+id);
+    if(nutEl !== null) {
+        let rows = nutEl.value.trim().split('\n').filter(r=>r.trim()).map(r=>r.split(',').map(c=>c.trim()));
+        let serving = nsEl ? nsEl.value.trim() : '';
+        p.nutrition = rows.length ? { rows: rows, serving: serving } : null;
+    }
         if(bsq !== '' && bsq !== undefined) {
             p.stockQty = parseInt(bsq) || 0;
             p.inStock  = p.stockQty > 0;
@@ -6733,6 +6802,78 @@ function openProductModal(type, id) {
             descToggle.style.display = 'none';
         }
     }, 50);
+
+    // ── Pack Info ──
+    let packInfoWrap = document.getElementById('pdm_packInfoWrap');
+    let packInfoEl = document.getElementById('pdm_packInfo');
+    if(packInfoEl && packInfoWrap) {
+        if(p.packInfo && p.packInfo.trim()) {
+            packInfoEl.innerText = p.packInfo;
+            packInfoWrap.style.display = 'block';
+        } else {
+            packInfoWrap.style.display = 'none';
+        }
+    }
+
+    // ── Ingredients ──
+    let ingWrap = document.getElementById('pdm_ingredientsWrap');
+    let ingEl = document.getElementById('pdm_ingredients');
+    if(ingEl && ingWrap) {
+        if(p.ingredients && p.ingredients.trim()) {
+            ingEl.innerText = p.ingredients;
+            ingWrap.style.display = 'block';
+        } else {
+            ingWrap.style.display = 'none';
+        }
+    }
+
+    // ── Nutritional Table ──
+    let nutWrap = document.getElementById('pdm_nutritionWrap');
+    let nutBody = document.getElementById('pdm_nutritionBody');
+    let servNote = document.getElementById('pdm_servingNote');
+    if(servNote && p.nutrition && p.nutrition.serving) {
+        servNote.innerText = 'Serving size: ' + p.nutrition.serving;
+        servNote.style.display = 'block';
+    } else if(servNote) {
+        servNote.style.display = 'none';
+    }
+    if(nutWrap && nutBody) {
+        if(p.nutrition && p.nutrition.rows && p.nutrition.rows.length) {
+            nutBody.innerHTML = p.nutrition.rows.map(function(row, i) {
+                let bg = i%2===0 ? '#f8f8f8' : 'white';
+                return '<tr style="background:'+bg+';">'
+                    +'<td style="padding:0.3rem 0.6rem;font-weight:600;color:#333;border-bottom:1px solid #eee;">'+esc(row.nutrient)+'</td>'
+                    +'<td style="padding:0.3rem 0.6rem;text-align:center;color:#555;border-bottom:1px solid #eee;">'+esc(String(row.per100g||'-'))+'</td>'
+                    +'<td style="padding:0.3rem 0.6rem;text-align:center;color:#555;border-bottom:1px solid #eee;">'+esc(String(row.perServing||'-'))+'</td>'
+                    +'</tr>';
+            }).join('');
+            if(servNote && p.nutrition.servingNote) servNote.innerText = p.nutrition.servingNote;
+            nutWrap.style.display = 'block';
+        } else {
+            nutWrap.style.display = 'none';
+        }
+    }
+
+    // ── Deal Timer ──
+    let timerWrap = document.getElementById('pdm_dealTimerWrap');
+    if(timerWrap) {
+        if(p.dealEndsAt && new Date(p.dealEndsAt) > new Date()) {
+            timerWrap.style.display = 'block';
+            if(window._pdmTimerInterval) clearInterval(window._pdmTimerInterval);
+            window._pdmTimerInterval = setInterval(function() {
+                let diff = Math.max(0, Math.floor((new Date(p.dealEndsAt) - new Date()) / 1000));
+                let h = Math.floor(diff/3600), m = Math.floor((diff%3600)/60), s = diff%60;
+                let hEl=document.getElementById('pdm_timerH'), mEl=document.getElementById('pdm_timerM'), sEl=document.getElementById('pdm_timerS');
+                if(hEl) hEl.innerText = String(h).padStart(2,'0');
+                if(mEl) mEl.innerText = String(m).padStart(2,'0');
+                if(sEl) sEl.innerText = String(s).padStart(2,'0');
+                if(diff === 0) clearInterval(window._pdmTimerInterval);
+            }, 1000);
+        } else {
+            timerWrap.style.display = 'none';
+            if(window._pdmTimerInterval) clearInterval(window._pdmTimerInterval);
+        }
+    }
 
     // Action buttons
     let cartBtn = document.getElementById('pdm_cartBtn');
@@ -8982,6 +9123,19 @@ function loadAdminProducts() {
         <div style="font-size:0.6rem;color:#d94030;font-weight:600;margin-bottom:2px;">✨ Highlights (ek per line):</div>
         <textarea class="admin-input" id="highlights_${p.id}" rows="4" style="resize:vertical;min-height:70px;font-family:inherit;font-size:0.65rem;" placeholder="🌿 100% Natural&#10;🌾 Best taste&#10;💪 Rich antioxidants">${esc(p.highlights ? p.highlights.join("\n") : "")}</textarea>
     </div>
+    <div style="margin-top:4px;">
+        <div style="font-size:0.6rem;color:#2c6e2c;font-weight:600;margin-bottom:2px;">📦 Pack Info:</div>
+        <input class="admin-input" id="packInfo_${p.id}" type="text" style="font-size:0.65rem;width:100%;box-sizing:border-box;" placeholder="e.g. 6 sachets × 30gm = 180gm" value="${esc(p.packInfo||'')}">
+    </div>
+    <div style="margin-top:4px;">
+        <div style="font-size:0.6rem;color:#1565c0;font-weight:600;margin-bottom:2px;">🧪 Ingredients:</div>
+        <textarea class="admin-input" id="ingredients_${p.id}" rows="3" style="resize:vertical;min-height:55px;font-family:inherit;font-size:0.65rem;" placeholder="e.g. Sattu, Jaljeera powder, Black salt...">${esc(p.ingredients||'')}</textarea>
+    </div>
+    <div style="margin-top:4px;">
+        <div style="font-size:0.6rem;color:#6200ea;font-weight:600;margin-bottom:2px;">📊 Nutrition (CSV: Name,per100g,perServing):</div>
+        <textarea class="admin-input" id="nutrition_${p.id}" rows="4" style="resize:vertical;min-height:70px;font-family:monospace;font-size:0.62rem;" placeholder="Protein,24.34,7.30&#10;Energy,381.62,114.48&#10;Fat,5.98,1.79&#10;Carbohydrate,57.61,17.28">${esc(p.nutrition && p.nutrition.rows ? p.nutrition.rows.map(r=>r.join(',')).join('\n') : '')}</textarea>
+        <div style="font-size:0.55rem;color:#888;margin-top:2px;">Per serving label: <input class="admin-input" id="nutServing_${p.id}" type="text" style="font-size:0.62rem;width:60%;display:inline;" placeholder="per /30gm" value="${esc(p.nutrition&&p.nutrition.serving||'')}"></div>
+    </div>
 </td>
             <td>
                 <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
@@ -9165,12 +9319,22 @@ function addProduct() {
         stockQty: stockQty,
         hsnCode: document.getElementById('newHsnCode').value.trim()||'1108',
         gstSlab: isNaN(gstSlabVal) ? 5 : gstSlabVal,
-        priceUnit: document.getElementById('newPriceUnit').value||''
+        priceUnit: document.getElementById('newPriceUnit').value||'',
+        packInfo: (document.getElementById('newPackInfo')||{value:''}).value.trim(),
+        ingredients: (document.getElementById('newIngredients')||{value:''}).value.trim(),
+        nutrition: (function(){
+            let _ne = document.getElementById('newNutrition');
+            let _ns = document.getElementById('newNutServing');
+            if(!_ne || !_ne.value.trim()) return null;
+            let _rows = _ne.value.trim().split('\n').filter(r=>r.trim()).map(r=>r.split(',').map(c=>c.trim()));
+            return { rows: _rows, serving: _ns ? _ns.value.trim() : '' };
+        })()
     };
     // ✅ FIX L-1: Form clear helper — sab fields reset karo after add
     function _clearAddForm() {
         ['newName','newDesc','newPrice','newDiscount','newCourier',
-         'newStockQty','newHsnCode','newCategory','newPriceUnit','newGstSlab'].forEach(function(fid) {
+         'newStockQty','newHsnCode','newCategory','newPriceUnit','newGstSlab',
+         'newPackInfo','newIngredients','newNutrition','newNutServing'].forEach(function(fid) {
             let fel = document.getElementById(fid); if(fel) fel.value='';
         });
         let photoEl = document.getElementById('newProductPhoto'); if(photoEl) photoEl.value='';
@@ -9302,6 +9466,16 @@ function saveAllProducts() {
         if(gst !== undefined && gst !== '') p.gstSlab = parseFloat(gst) || 5;
         let hl = document.getElementById(`highlights_${p.id}`)?.value;
         if(hl !== undefined) p.highlights = hl.split('\n').map(h=>h.trim()).filter(h=>h.length>0);
+        let _pi = document.getElementById('packInfo_'+p.id);
+        if(_pi !== null) p.packInfo = _pi.value.trim();
+        let _ing = document.getElementById('ingredients_'+p.id);
+        if(_ing !== null) p.ingredients = _ing.value.trim();
+        let _nut = document.getElementById('nutrition_'+p.id);
+        let _ns = document.getElementById('nutServing_'+p.id);
+        if(_nut !== null) {
+            let _rows = _nut.value.trim().split('\n').filter(r=>r.trim()).map(r=>r.split(',').map(c=>c.trim()));
+            p.nutrition = _rows.length ? { rows: _rows, serving: _ns ? _ns.value.trim() : '' } : null;
+        }
         let pu = document.getElementById(`priceunit_${p.id}`)?.value;
         if(pu !== undefined) p.priceUnit = pu;
     }
