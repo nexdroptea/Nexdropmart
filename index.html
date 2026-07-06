@@ -1662,8 +1662,8 @@ function _stripPasswords(usersArr) {
     .logo-text span { color: #f4884a; }
     .logo-text small { font-size: 0.58rem; display: block; color: #6b4a3a; font-weight: 400; }
 
-    .nav-links { display: flex; gap: 1.5rem; align-items: center; flex-wrap: nowrap; }
-    .nav-links a { text-decoration: none; color: #2c3e2f; font-weight: 500; transition: all 0.3s; position: relative; font-size: 0.88rem; white-space: nowrap; }
+    .nav-links { display: flex; gap: 1rem; align-items: center; flex-wrap: nowrap; }
+    .nav-links a { text-decoration: none; color: #2c3e2f; font-weight: 500; transition: all 0.3s; position: relative; font-size: 0.82rem; white-space: nowrap; }
     .nav-links a::after { content: ''; position: absolute; bottom: -4px; left: 0; width: 0; height: 2px; background: #f4884a; transition: width 0.3s; border-radius: 2px; }
     .nav-links a:hover::after { width: 100%; }
     .nav-links a:hover { color: #f4884a; }
@@ -1696,7 +1696,7 @@ function _stripPasswords(usersArr) {
         background: none; border: none; color: #d94030;
     }
 
-    @media (max-width: 1024px) {
+    @media (max-width: 900px) {
         .menu-icon { display: block; }
         .nav-links {
             display: none; flex-direction: column; gap: 0;
@@ -1714,6 +1714,24 @@ function _stripPasswords(usersArr) {
         .nav-right { display: flex !important; align-items: center; gap: 0.5rem; }
         .user-btn { display: inline-block !important; }
         .admin-btn { display: inline-block !important; }
+    }
+    /* ✅ Desktop (901px+): horizontal nav, no hamburger */
+    @media (min-width: 901px) {
+        .menu-icon { display: none !important; }
+        .nav-links {
+            display: flex !important;
+            flex-direction: row;
+            gap: 0.8rem;
+            position: static;
+            background: transparent;
+            box-shadow: none;
+            padding: 0;
+            border: none;
+            align-items: center;
+        }
+        .nav-links a { padding: 0; width: auto; border: none; font-size: 0.85rem; }
+        .nav-links .cart-icon { padding: 0; }
+        #navCatSection { display: none !important; }
     }
 
     /* Hero Section */
@@ -2026,7 +2044,7 @@ img { max-width: 100%; height: auto; }
 }
 
 /* --- NAVBAR TABLET (769px–1024px) --- */
-@media (min-width: 769px) and (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 900px) {
     .navbar { padding: 0.7rem 1rem; }
     .nav-links a { font-size: 0.8rem; }
     .admin-btn, .user-btn { font-size: 0.72rem; padding: 0.28rem 0.6rem; }
@@ -2035,7 +2053,7 @@ img { max-width: 100%; height: auto; }
 }
 
 /* --- MOBILE NAVBAR FIX --- */
-@media (max-width: 1024px) {
+@media (max-width: 900px) {
     .nav-links {
         top: 62px !important;
         left: 0; right: 0;
@@ -2104,7 +2122,7 @@ img { max-width: 100%; height: auto; }
         grid-template-columns: repeat(2, 1fr) !important; /* Small tablet: 2 columns */
     }
 }
-@media (min-width: 769px) and (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 900px) {
     .home-product-grid {
         grid-template-columns: repeat(3, 1fr) !important; /* Tablet: 3 columns */
         gap: 1.1rem !important;
@@ -2405,7 +2423,7 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
 .navbar { top: 37px !important; }
 .hero { margin-top: 102px !important; }
 #heroSlider { margin-top: 102px !important; }
-@media(max-width:768px){ #announcementBar{font-size:0.7rem;padding:7px 0.5rem;} .navbar{top:33px!important;} .hero,.hero{margin-top:98px!important;} #heroSlider{margin-top:98px!important;} }
+@media(max-width:900px){ #announcementBar{font-size:0.7rem;padding:7px 0.5rem;} .navbar{top:33px!important;} .hero,.hero{margin-top:98px!important;} #heroSlider{margin-top:98px!important;} }
 </style>
 
 <!-- Navigation -->
