@@ -1965,7 +1965,7 @@ function _stripPasswords(usersArr) {
     .tab-content.active { display: block; }
     
     .admin-table-wrapper { overflow-x: auto; margin-top: 1rem; }
-    .admin-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; min-width: 1100px; }
+    .admin-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; min-width: 900px; }
     .admin-table th, .admin-table td { padding: 0.7rem 0.6rem; text-align: left; border-bottom: 1px solid #eee; vertical-align: middle; }
     .admin-table th { background: #f5f0ea; font-weight: 600; position: sticky; top: 0; white-space: nowrap; }
     .admin-input { padding: 0.45rem 0.5rem; font-size: 0.78rem; width: 100%; border: 1px solid #ddd; border-radius: 6px; min-width: 80px; }
@@ -9205,24 +9205,19 @@ function loadAdminProducts() {
                 <input class="admin-input" type="number" id="gstslab_${p.id}" value="${p.gstSlab!==undefined&&p.gstSlab!==null?p.gstSlab:5}" placeholder="GST%" min="0" max="28" step="0.1" style="width:60px;border:1px solid #ce93d8;font-size:0.72rem;text-align:center;">
                 <div style="font-size:0.55rem;color:#7b1fa2;margin-top:2px;text-align:center;">GST %</div>
             </td>
-            <td>
-    <textarea class="admin-input admin-input-desc" id="desc_${p.id}" rows="3" style="resize:vertical;min-height:60px;font-family:inherit;">${esc(p.desc||"")}</textarea>
-    <div style="margin-top:4px;">
+            <td style="min-width:180px;max-width:220px;">
+    <textarea class="admin-input admin-input-desc" id="desc_${p.id}" rows="2" style="resize:vertical;min-height:48px;font-family:inherit;width:100%;box-sizing:border-box;font-size:0.72rem;">${esc(p.desc||"")}</textarea>
+    <button onclick="(function(btn,id){var el=document.getElementById('extraFields_'+id);var open=el.style.display!=='none';el.style.display=open?'none':'block';btn.textContent=open?'✏️ More Fields':'🔼 Hide Fields';})(this,${p.id})" style="margin-top:4px;width:100%;background:#f5f0ea;border:1px solid #d94030;color:#d94030;border-radius:6px;padding:2px 6px;font-size:0.62rem;font-weight:700;cursor:pointer;">✏️ More Fields</button>
+    <div id="extraFields_${p.id}" style="display:none;margin-top:4px;">
         <div style="font-size:0.6rem;color:#d94030;font-weight:600;margin-bottom:2px;">✨ Highlights (one per line):</div>
-        <textarea class="admin-input" id="highlights_${p.id}" rows="4" style="resize:vertical;min-height:70px;font-family:inherit;font-size:0.65rem;" placeholder="🌿 100% Natural&#10;🌾 Best taste&#10;💪 Rich antioxidants">${esc(p.highlights ? p.highlights.join("\n") : "")}</textarea>
-    </div>
-    <div style="margin-top:4px;">
-        <div style="font-size:0.6rem;color:#2c6e2c;font-weight:600;margin-bottom:2px;">📦 Pack Info:</div>
+        <textarea class="admin-input" id="highlights_${p.id}" rows="3" style="resize:vertical;min-height:55px;font-family:inherit;font-size:0.65rem;width:100%;box-sizing:border-box;" placeholder="🌿 100% Natural&#10;🌾 Best taste&#10;💪 Rich antioxidants">${esc(p.highlights ? p.highlights.join("\n") : "")}</textarea>
+        <div style="font-size:0.6rem;color:#2c6e2c;font-weight:600;margin:4px 0 2px;">📦 Pack Info:</div>
         <input class="admin-input" id="packInfo_${p.id}" type="text" style="font-size:0.65rem;width:100%;box-sizing:border-box;" placeholder="e.g. 6 sachets × 30gm = 180gm" value="${esc(p.packInfo||'')}">
-    </div>
-    <div style="margin-top:4px;">
-        <div style="font-size:0.6rem;color:#1565c0;font-weight:600;margin-bottom:2px;">🧪 Ingredients:</div>
-        <textarea class="admin-input" id="ingredients_${p.id}" rows="3" style="resize:vertical;min-height:55px;font-family:inherit;font-size:0.65rem;" placeholder="e.g. Sattu, Jaljeera powder, Black salt...">${esc(p.ingredients||'')}</textarea>
-    </div>
-    <div style="margin-top:4px;">
-        <div style="font-size:0.6rem;color:#6200ea;font-weight:600;margin-bottom:2px;">📊 Nutrition (CSV: Name,per100g,perServing):</div>
-        <textarea class="admin-input" id="nutrition_${p.id}" rows="4" style="resize:vertical;min-height:70px;font-family:monospace;font-size:0.62rem;" placeholder="Protein,24.34,7.30&#10;Energy,381.62,114.48&#10;Fat,5.98,1.79&#10;Carbohydrate,57.61,17.28">${esc(p.nutrition && p.nutrition.rows ? p.nutrition.rows.map(r=>r.join(',')).join('\n') : '')}</textarea>
-        <div style="font-size:0.55rem;color:#888;margin-top:2px;">Per serving label: <input class="admin-input" id="nutServing_${p.id}" type="text" style="font-size:0.62rem;width:60%;display:inline;" placeholder="per /30gm" value="${esc(p.nutrition&&p.nutrition.serving||'')}"></div>
+        <div style="font-size:0.6rem;color:#1565c0;font-weight:600;margin:4px 0 2px;">🧪 Ingredients:</div>
+        <textarea class="admin-input" id="ingredients_${p.id}" rows="2" style="resize:vertical;min-height:45px;font-family:inherit;font-size:0.65rem;width:100%;box-sizing:border-box;" placeholder="e.g. Sattu, Jaljeera powder, Black salt...">${esc(p.ingredients||'')}</textarea>
+        <div style="font-size:0.6rem;color:#6200ea;font-weight:600;margin:4px 0 2px;">📊 Nutrition (CSV: Name,per100g,perServing):</div>
+        <textarea class="admin-input" id="nutrition_${p.id}" rows="3" style="resize:vertical;min-height:55px;font-family:monospace;font-size:0.62rem;width:100%;box-sizing:border-box;" placeholder="Protein,24.34,7.30&#10;Energy,381.62,114.48&#10;Fat,5.98,1.79&#10;Carbohydrate,57.61,17.28">${esc(p.nutrition && p.nutrition.rows ? p.nutrition.rows.map(r=>r.join(',')).join('\n') : '')}</textarea>
+        <div style="font-size:0.55rem;color:#888;margin-top:2px;">Per serving: <input class="admin-input" id="nutServing_${p.id}" type="text" style="font-size:0.62rem;width:55%;display:inline;" placeholder="per /30gm" value="${esc(p.nutrition&&p.nutrition.serving||'')}"></div>
     </div>
 </td>
             <td>
