@@ -409,7 +409,7 @@ async function sbLoadProducts() {
                 highlights: p.highlights || [],
                 extraImages: p.extra_images || [],
                 category: p.category || '',
-                rating: p.rating || 4.5,
+                rating: p.rating || 0,
                 ratingCount: p.rating_count || 0,
                 priceUnit: p.price_unit || '',
                 sortOrder: p.sort_order !== null && p.sort_order !== undefined ? p.sort_order : p.id, // ✅ FIX v44.3: sort_order fallback to id
@@ -422,11 +422,33 @@ async function sbLoadProducts() {
             if(typeof displayProducts === 'function') displayProducts();
             if(typeof displayHomeProducts === 'function') displayHomeProducts();
 
-            // ✅ PHASE 2: Load image_value in background — update cards when ready
-            _sbLoadProductImages(data.map(p => p.id));
+            // ✅ PHASE 2 (v45 FIX): Ek saath saari images nahi — chunks mein load karo
+            // Pehle 12 products (jo turant screen pe dikhte hain) fast load honge,
+            // baaki background mein thodi der ruk-ruk kar — slow/2G-3G connections pe
+            // ye bahut fark padta hai kyunki ek hi request mein saari base64 images
+            // download hone se page "slow open" feel hota tha.
+            _sbLoadProductImagesChunked(data.map(p => p.id));
         }
     } catch(e) {
         console.log('Supabase products load skipped:', e.message);
+    }
+}
+
+// ✅ v45 FIX: Chunk-wise image loading — ek saath saari products ki images
+// download karne ke bajaye, chhote batches mein load karo. Isse:
+// 1) Pehli screen turant load hoti hai (jo products visible hain unki images pehle)
+// 2) Slow network (2G/3G/throttled) par bhi UI turant responsive rehta hai
+// 3) Baaki images background mein chupchap load hoti rehti hain
+async function _sbLoadProductImagesChunked(ids) {
+    if(!ids || !ids.length) return;
+    const CHUNK_SIZE = 12; // ek batch mein itne products ki images
+    const GAP_MS = 200;    // batches ke beech thoda gap — network/UI thread ko saans
+    for(let i = 0; i < ids.length; i += CHUNK_SIZE) {
+        let chunk = ids.slice(i, i + CHUNK_SIZE);
+        await _sbLoadProductImages(chunk);
+        if(i + CHUNK_SIZE < ids.length) {
+            await new Promise(resolve => setTimeout(resolve, GAP_MS));
+        }
     }
 }
 
@@ -471,6 +493,97 @@ async function _sbLoadProductImages(ids) {
         console.log('✅ Product images Phase 2 loaded');
     } catch(e) {
         console.log('Product images phase 2 load failed:', e.message);
+    }
+}
+
+// ✅ FIX v46: ONE-TIME TOOL — purane products ki bade/uncompressed base64 images ko
+// canvas se resize (max 600px) + recompress (jpeg 0.6 quality) karke Supabase mein
+// wapas save karta hai. Naye uploads pehle se compressed hote hain (see extra images
+// upload handler), lekin purane records jo is fix se pehle save hue the abhi bhi
+// bade/uncompressed ho sakte hain — wahi products load slow karne ka ek reason hai.
+async function compressOldProductImages() {
+    const btn = document.getElementById('compressImgBtn');
+    const progressEl = document.getElementById('compressImgProgress');
+    const SIZE_THRESHOLD = 150000; // ~150KB se bade base64 ko hi touch karo
+    const MAX_DIM = 600;
+    const QUALITY = 0.6;
+
+    function setProgress(msg) {
+        if(progressEl) { progressEl.style.display = 'block'; progressEl.textContent = msg; }
+    }
+
+    if(btn) { btn.disabled = true; btn.textContent = '⏳ Scanning...'; }
+    setProgress('Products scan ho rahe hain...');
+
+    try {
+        const { data, error } = await sbSafeQuery(() =>
+            db.from('products').select('id,name,image_type,image_value').order('id')
+        );
+        if(error) throw new Error(error.message);
+        if(!data || !data.length) { setProgress('✅ Koi product nahi mila.'); if(btn){btn.disabled=false;btn.textContent='🗜️ Scan & Compress Now';} return; }
+
+        const targets = data.filter(row =>
+            row.image_type === 'upload' && row.image_value &&
+            row.image_value.startsWith('data:') && row.image_value.length > SIZE_THRESHOLD
+        );
+
+        if(!targets.length) {
+            setProgress('✅ Sab images already chhoti hain — kuch compress karne ki zaroorat nahi!');
+            if(btn) { btn.disabled = false; btn.textContent = '🗜️ Scan & Compress Now'; }
+            return;
+        }
+
+        setProgress(`🔍 ${targets.length} badi image mili. Compress ho raha hai...`);
+
+        let done = 0, saved = 0, failed = 0;
+        for(const row of targets) {
+            try {
+                const compressedDataUrl = await new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.onload = function() {
+                        let w = img.width, h = img.height;
+                        if(w > h) { if(w > MAX_DIM) { h = Math.round(h * MAX_DIM / w); w = MAX_DIM; } }
+                        else { if(h > MAX_DIM) { w = Math.round(w * MAX_DIM / h); h = MAX_DIM; } }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        resolve(canvas.toDataURL('image/jpeg', QUALITY));
+                    };
+                    img.onerror = () => reject(new Error('image decode failed'));
+                    img.src = row.image_value;
+                });
+
+                // Sirf tabhi save karo jab naya version chhota ho
+                if(compressedDataUrl.length < row.image_value.length) {
+                    const { error: updErr } = await sbSafeQuery(() =>
+                        db.from('products').update({ image_value: compressedDataUrl }).eq('id', row.id)
+                    );
+                    if(updErr) { failed++; }
+                    else {
+                        saved++;
+                        // In-memory products array bhi update karo taaki turant reflect ho
+                        let p = products.find(pp => pp.id === row.id);
+                        if(p) p.imageValue = compressedDataUrl;
+                    }
+                }
+            } catch(imgErr) {
+                failed++;
+            }
+            done++;
+            setProgress(`🗜️ ${done}/${targets.length} processed — ${saved} compressed, ${failed} failed...`);
+            // Thoda gap taaki UI thread aur Supabase rate limit dono ko saans mile
+            await new Promise(r => setTimeout(r, 150));
+        }
+
+        setProgress(`✅ Done! ${saved} images compress ho gayi, ${failed} fail hui (total ${targets.length} scan ki).`);
+        if(typeof displayProducts === 'function') displayProducts();
+        if(typeof displayHomeProducts === 'function') displayHomeProducts();
+        showToast(`✅ ${saved} product images compressed!`, '#25D366');
+    } catch(e) {
+        setProgress('❌ Error: ' + (e.message || 'kuch galat ho gaya'));
+        showToast('❌ Image compression failed: ' + (e.message||''), '#ff4444');
+    } finally {
+        if(btn) { btn.disabled = false; btn.textContent = '🗜️ Scan & Compress Now'; }
     }
 }
 
@@ -1965,7 +2078,7 @@ function _stripPasswords(usersArr) {
     .tab-content.active { display: block; }
     
     .admin-table-wrapper { overflow-x: auto; margin-top: 1rem; }
-    .admin-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; min-width: 900px; }
+    .admin-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; min-width: 1100px; }
     .admin-table th, .admin-table td { padding: 0.7rem 0.6rem; text-align: left; border-bottom: 1px solid #eee; vertical-align: middle; }
     .admin-table th { background: #f5f0ea; font-weight: 600; position: sticky; top: 0; white-space: nowrap; }
     .admin-input { padding: 0.45rem 0.5rem; font-size: 0.78rem; width: 100%; border: 1px solid #ddd; border-radius: 6px; min-width: 80px; }
@@ -2011,7 +2124,7 @@ function _stripPasswords(usersArr) {
         .product-grid, .b2b-grid { grid-template-columns: 1fr; }
         .tabs { gap: 0.4rem; }
         .tab { padding: 0.45rem 1rem; font-size: 0.78rem; }
-        .hero { height: 80vh; min-height: 500px; }
+        .hero { height: 70vh; min-height: 400px; }
         .hero h1 { font-size: 2.4rem; }
         .hero p { font-size: 1.15rem; }
         .hero-badge { font-size: 0.68rem; }
@@ -2128,10 +2241,65 @@ img { max-width: 100%; height: auto; }
         gap: 1.1rem !important;
     }
 }
-@media (min-width: 1025px) {
+
+/* ═══════════════════════════════════════
+   TABLET VIEW — 769px to 900px
+   ═══════════════════════════════════════ */
+@media (min-width: 769px) and (max-width: 900px) {
+
+    /* Product carousel */
+    #productScrollCarousel { padding: 0.6rem 0; }
+    .psc-card { width: 160px !important; }
+
+    /* Cart panel full width on tablet */
+    .cart-panel { width: 360px !important; max-width: 90vw !important; }
+
+    /* Modal full width */
+    .modal-content { max-width: 90vw !important; width: 90vw !important; }
+
+    /* Product detail modal */
+    #productDetailModal .modal-content,
+    #pdm_modal { max-width: 92vw !important; }
+
+    /* About page sections */
+    .about-content { grid-template-columns: 1fr !important; }
+    .about-stats { grid-template-columns: repeat(2, 1fr) !important; }
+    .strength-item { font-size: 0.82rem; }
+
+    /* Features strip */
+    .features-strip { grid-template-columns: repeat(2, 1fr) !important; }
+
+    /* Footer */
+    .footer-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 1.5rem; }
+
+    /* Admin panel */
+    .tab-content { padding: 0.8rem !important; }
+    .admin-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .admin-tab-btn { font-size: 0.72rem !important; padding: 0.4rem 0.6rem !important; }
+
+    /* Offer cards */
+    #offerCardsGrid { grid-template-columns: repeat(2, 1fr) !important; }
+
+    /* Hero text */
+    .hero h1 { font-size: 2.2rem !important; }
+    .hero p { font-size: 1rem !important; }
+
+    /* Section headings */
+    .section-title { font-size: 1.4rem !important; }
+
+    /* Stat cards */
+    .about-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
+@media (min-width: 901px) {
     .home-product-grid {
         grid-template-columns: repeat(4, 1fr) !important; /* Desktop: 4 columns */
         gap: 1.4rem !important;
+    }
+}
+@media (min-width: 769px) and (max-width: 900px) {
+    .home-product-grid {
+        grid-template-columns: repeat(3, 1fr) !important; /* Tablet: 3 columns */
+        gap: 1.1rem !important;
     }
 }
 
@@ -2407,6 +2575,18 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
     /* ============================================================
    END RESPONSIVE IMPROVEMENTS
    ============================================================ */
+
+/* home-product-grid: 900-1024px (large tablet / small laptop) — 3 columns */
+@media (min-width: 901px) and (max-width: 1024px) {
+    .home-product-grid {
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 1.2rem !important;
+    }
+    .product-grid, .b2b-grid,
+    #b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid {
+        grid-template-columns: repeat(3, 1fr) !important;
+    }
+}
 </style>
 <!-- ✅ Real QR Code library — UPI QR generation ke liye -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -2781,75 +2961,16 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
 <div id="testimonials-section" class="section" style="background:linear-gradient(135deg,#f5f0ea,#ede5d8);border-radius:24px;margin:1rem 1.5rem;">
     <h2 class="section-title">💬 Customer Reviews</h2>
     <p style="text-align:center;color:#6b5e4a;font-size:0.9rem;margin-bottom:1.5rem;">What our happy customers and B2B partners have to say</p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.2rem;">
-
-        <div style="background:white;border-radius:18px;padding:1.3rem;box-shadow:0 5px 20px rgba(0,0,0,0.06);position:relative;">
-            <div style="color:#ffb800;font-size:1rem;margin-bottom:0.5rem;">★★★★★</div>
-            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"Excellent quality 7 Suta Premium Makhana — the aroma and freshness are outstanding. The whole family loves it. Will definitely order again!"</p>
-            <div style="display:flex;align-items:center;gap:0.7rem;margin-top:1rem;">
-                <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#d94030,#f4884a);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;">R</div>
-                <div><div style="font-weight:700;font-size:0.85rem;">Rahul Sharma</div><div style="font-size:0.7rem;color:#f4884a;">📍 Patna, Bihar</div></div>
-            </div>
-            <div style="position:absolute;top:1rem;right:1rem;background:#e8f5e9;color:#d94030;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">✅ Verified</div>
-        </div>
-
-        <div style="background:white;border-radius:18px;padding:1.3rem;box-shadow:0 5px 20px rgba(0,0,0,0.06);position:relative;">
-            <div style="color:#ffb800;font-size:1rem;margin-bottom:0.5rem;">★★★★★</div>
-            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"The 6 Suta Makhana is restaurant-grade — big, crunchy and perfectly roasted. Best quality I've found online. Highly recommended!"</p>
-            <div style="display:flex;align-items:center;gap:0.7rem;margin-top:1rem;">
-                <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#f4884a,#d94030);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;">P</div>
-                <div><div style="font-weight:700;font-size:0.85rem;">Priya Singh</div><div style="font-size:0.7rem;color:#f4884a;">📍 Lucknow, UP</div></div>
-            </div>
-            <div style="position:absolute;top:1rem;right:1rem;background:#e8f5e9;color:#d94030;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">✅ Verified</div>
-        </div>
-
-        <div style="background:white;border-radius:18px;padding:1.3rem;box-shadow:0 5px 20px rgba(0,0,0,0.06);position:relative;">
-            <div style="color:#ffb800;font-size:1rem;margin-bottom:0.5rem;">★★★★★</div>
-            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"We ordered the 3 KG Makhana Wholesale Jar for our store and the quality is top-notch. Pricing is very competitive for bulk orders. Our entire supply comes from Makhan<span class="brand-az">az</span> now!"</p>
-            <div style="display:flex;align-items:center;gap:0.7rem;margin-top:1rem;">
-                <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#8b1a10,#f4884a);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;">A</div>
-                <div><div style="font-weight:700;font-size:0.85rem;">Amit Gupta — Wholesale Partner</div><div style="font-size:0.7rem;color:#f4884a;">📍 Varanasi, UP | 3 KG Jar Buyer</div></div>
-            </div>
-            <div style="position:absolute;top:1rem;right:1rem;background:#fff3e0;color:#f4884a;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">🏭 Wholesale</div>
-        </div>
-
-        <div style="background:white;border-radius:18px;padding:1.3rem;box-shadow:0 5px 20px rgba(0,0,0,0.06);position:relative;">
-            <div style="color:#ffb800;font-size:1rem;margin-bottom:0.5rem;">★★★★☆</div>
-            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"Tried the 5 Suta Makhana and the Mix Grade — both are extremely fresh. The COD option makes ordering very convenient. Keep up the great work, Makhan<span class="brand-az">az</span>!"</p>
-            <div style="display:flex;align-items:center;gap:0.7rem;margin-top:1rem;">
-                <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#d94030,#8b1a10);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;">S</div>
-                <div><div style="font-weight:700;font-size:0.85rem;">Sunita Devi</div><div style="font-size:0.7rem;color:#f4884a;">📍 Siwan, Bihar</div></div>
-            </div>
-            <div style="position:absolute;top:1rem;right:1rem;background:#e8f5e9;color:#d94030;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">✅ Verified</div>
-        </div>
-
-        <div style="background:white;border-radius:18px;padding:1.3rem;box-shadow:0 5px 20px rgba(0,0,0,0.06);position:relative;">
-            <div style="color:#ffb800;font-size:1rem;margin-bottom:0.5rem;">★★★★★</div>
-            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"Ordered the Makhana Gift Pack for Diwali — beautifully packed and everyone loved the taste. Genuinely premium quality. Makhan<span class="brand-az">az</span> is the best!"</p>
-            <div style="display:flex;align-items:center;gap:0.7rem;margin-top:1rem;">
-                <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#f4884a,#8b1a10);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;">M</div>
-                <div><div style="font-weight:700;font-size:0.85rem;">Mohammad Faiz</div><div style="font-size:0.7rem;color:#f4884a;">📍 Gorakhpur, UP</div></div>
-            </div>
-            <div style="position:absolute;top:1rem;right:1rem;background:#e8f5e9;color:#d94030;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">✅ Verified</div>
-        </div>
-
-        <div style="background:white;border-radius:18px;padding:1.3rem;box-shadow:0 5px 20px rgba(0,0,0,0.06);position:relative;">
-            <div style="color:#ffb800;font-size:1rem;margin-bottom:0.5rem;">★★★★★</div>
-            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"Ordered 3 KG Wholesale Makhana Jar for my retail shop — the quality and freshness are unmatched. The GST invoice support is very helpful for business. Excellent service!"</p>
-            <div style="display:flex;align-items:center;gap:0.7rem;margin-top:1rem;">
-                <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#5c0f0a,#d94030);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;">K</div>
-                <div><div style="font-weight:700;font-size:0.85rem;">Kavita Yadav — Shop Owner</div><div style="font-size:0.7rem;color:#f4884a;">📍 Muzaffarpur, Bihar | 3 KG Jar Buyer</div></div>
-            </div>
-            <div style="position:absolute;top:1rem;right:1rem;background:#fff3e0;color:#f4884a;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">🏭 Wholesale</div>
-        </div>
-
+    <!-- ✅ FIX v46: Fully dynamic ab — sirf real approved customer reviews yahan dikhte hain.
+         Pehle yahan 6 hardcoded fake reviews (Rahul Sharma, Priya Singh, etc.) the jo
+         hamesha dikhte the aur unka fake rating average mein bhi mix ho jaata tha. -->
+    <div id="dynamicReviewsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.2rem;">
+        <div id="noReviewsMsg" style="grid-column:1/-1;text-align:center;padding:2rem 1rem;color:#9a8f7f;font-size:0.85rem;">⭐ Be the first to review our products! Reviews load ho rahi hain...</div>
     </div>
-    <!-- ✅ Dynamic Approved Customer Reviews (Admin se approve hone ke baad yahan dikhenge) -->
-    <div id="dynamicReviewsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.2rem;margin-top:0.5rem;"></div>
 
     <div style="text-align:center;margin-top:1.5rem;padding:1rem;background:white;border-radius:16px;">
-        <div id="homepageRatingDisplay" style="font-size:2rem;font-weight:800;color:#d94030;">4.8 ★</div>
-        <div style="font-size:0.8rem;color:#6b5e4a;" id="homepageReviewCount">1,000+ Happy Customers | 98% Satisfaction Rate</div>
+        <div id="homepageRatingDisplay" style="font-size:2rem;font-weight:800;color:#d94030;">— ★</div>
+        <div style="font-size:0.8rem;color:#6b5e4a;" id="homepageReviewCount">Reviews loading...</div>
     </div>
 </div>
 
@@ -4435,42 +4556,9 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
 </div>
 <!-- ✅ v31: Custom category stock cards — dynamically rendered -->
 <div id="statCustomCatCards" style="display:flex;flex-wrap:wrap;gap:0.5rem;margin:0.5rem 0;"></div>
-<div class="admin-tabs"><div class="admin-tab" onclick="switchTab('analytics')" style="background:linear-gradient(135deg,#1a2a5a,#3f51b5);color:white;">📊 Analytics</div><div class="admin-tab" onclick="switchTab('reviews')" style="background:linear-gradient(135deg,#5a3a1a,#ff9800);color:white;">⭐ Reviews</div><div class="admin-tab" onclick="switchTab('sellers')" style="background:linear-gradient(135deg,#1a4a2a,#43a047);color:white;">🏪 Sellers <span id="sellerPendingBadge" style="display:none;background:red;color:white;border-radius:50%;font-size:0.65rem;padding:1px 5px;margin-left:4px;">0</span></div><div class="admin-tab" onclick="switchTab('products')">📦 Products <span id="sellerProductBadge" style="display:none;background:red;color:white;border-radius:50%;font-size:0.65rem;padding:1px 5px;margin-left:4px;">0</span></div><div class="admin-tab" onclick="switchTab('orders')">📋 Orders</div><div class="admin-tab" onclick="switchTab('stock')">🏪 Stock</div><div class="admin-tab" onclick="switchTab('users')">👥 Users</div><div class="admin-tab" onclick="switchTab('bulk')">🏭 Enquiries</div><div class="admin-tab" onclick="switchTab('dealership')" style="background:linear-gradient(135deg,#1a3a5a,#f4884a);color:white;">🤝 Dealership</div><div class="admin-tab" onclick="switchTab('distributors')" style="background:linear-gradient(135deg,#d94030,#f4884a);color:white;">🏭 Distributors <span id="distPendingBadge" style="display:none;background:red;color:white;border-radius:50%;font-size:0.65rem;padding:1px 5px;margin-left:4px;">0</span></div><div class="admin-tab" onclick="switchTab('b2b')">📦 B2B</div><div class="admin-tab" onclick="switchTab('wholesale-invoice')" style="background:linear-gradient(135deg,#1a4a3a,#f4884a);color:white;">🧾 Wholesale Invoice</div><div class="admin-tab" onclick="switchTab('khata')" style="background:linear-gradient(135deg,#1a3a5a,#e53935);color:white;">📒 Khata (Debit/Credit)</div><div class="admin-tab" onclick="switchTab('purchase')" style="background:linear-gradient(135deg,#4a1a3a,#9c27b0);color:white;">🛒 Purchase Bills</div><div class="admin-tab" onclick="switchTab('brcm')" style="background:linear-gradient(135deg,#1a5a4a,#25D366);color:white;">📢 Broadcast</div><div class="admin-tab" onclick="switchTab('gst')" style="background:linear-gradient(135deg,#3a1a5a,#7b1fa2);color:white;">💰 GST</div><div class="admin-tab" onclick="switchTab('reports')" style="background:linear-gradient(135deg,#1a3a6a,#2196f3);color:white;">📊 Reports</div><div class="admin-tab" onclick="switchTab('settings')">⚙️ Settings</div><div class="admin-tab" onclick="adminGoHome()" style="background:linear-gradient(135deg,#f4884a,#a07840);color:white;">🏠 Home Page</div><div class="admin-tab" onclick="openSliderManager()" style="background:linear-gradient(135deg,#1a5a4a,#f4884a);color:white;">🖼️ Slider Images</div></div>
+<div class="admin-tabs"><div class="admin-tab" onclick="switchTab('analytics')" style="background:linear-gradient(135deg,#1a2a5a,#3f51b5);color:white;">📊 Analytics</div><div class="admin-tab" onclick="switchTab('reviews')" style="background:linear-gradient(135deg,#5a3a1a,#ff9800);color:white;">⭐ Reviews</div><div class="admin-tab" onclick="switchTab('products')">📦 Products</div><div class="admin-tab" onclick="switchTab('orders')">📋 Orders</div><div class="admin-tab" onclick="switchTab('stock')">🏪 Stock</div><div class="admin-tab" onclick="switchTab('users')">👥 Users</div><div class="admin-tab" onclick="switchTab('bulk')">🏭 Enquiries</div><div class="admin-tab" onclick="switchTab('dealership')" style="background:linear-gradient(135deg,#1a3a5a,#f4884a);color:white;">🤝 Dealership</div><div class="admin-tab" onclick="switchTab('distributors')" style="background:linear-gradient(135deg,#d94030,#f4884a);color:white;">🏭 Distributors <span id="distPendingBadge" style="display:none;background:red;color:white;border-radius:50%;font-size:0.65rem;padding:1px 5px;margin-left:4px;">0</span></div><div class="admin-tab" onclick="switchTab('b2b')">📦 B2B</div><div class="admin-tab" onclick="switchTab('wholesale-invoice')" style="background:linear-gradient(135deg,#1a4a3a,#f4884a);color:white;">🧾 Wholesale Invoice</div><div class="admin-tab" onclick="switchTab('khata')" style="background:linear-gradient(135deg,#1a3a5a,#e53935);color:white;">📒 Khata (Debit/Credit)</div><div class="admin-tab" onclick="switchTab('purchase')" style="background:linear-gradient(135deg,#4a1a3a,#9c27b0);color:white;">🛒 Purchase Bills</div><div class="admin-tab" onclick="switchTab('brcm')" style="background:linear-gradient(135deg,#1a5a4a,#25D366);color:white;">📢 Broadcast</div><div class="admin-tab" onclick="switchTab('gst')" style="background:linear-gradient(135deg,#3a1a5a,#7b1fa2);color:white;">💰 GST</div><div class="admin-tab" onclick="switchTab('reports')" style="background:linear-gradient(135deg,#1a3a6a,#2196f3);color:white;">📊 Reports</div><div class="admin-tab" onclick="switchTab('settings')">⚙️ Settings</div><div class="admin-tab" onclick="adminGoHome()" style="background:linear-gradient(135deg,#f4884a,#a07840);color:white;">🏠 Home Page</div><div class="admin-tab" onclick="openSliderManager()" style="background:linear-gradient(135deg,#1a5a4a,#f4884a);color:white;">🖼️ Slider Images</div></div>
 
-<!-- ✅ Sellers Tab -->
-<div id="tab-sellers" class="tab-content">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.8rem;">
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-      <button class="btn-small" onclick="filterSellerStatus('all')" id="sfBtn_all" style="background:#d94030;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">All</button>
-      <button class="btn-small" onclick="filterSellerStatus('pending')" id="sfBtn_pending" style="background:#f59e0b;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">⏳ Pending</button>
-      <button class="btn-small" onclick="filterSellerStatus('approved')" id="sfBtn_approved" style="background:#16a34a;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">✅ Approved</button>
-      <button class="btn-small" onclick="filterSellerStatus('rejected')" id="sfBtn_rejected" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">✗ Rejected</button>
-      <button class="btn-small" onclick="filterSellerStatus('banned')" id="sfBtn_banned" style="background:#7c3aed;color:white;border:none;border-radius:6px;padding:4px 12px;font-size:0.75rem;cursor:pointer;">🚫 Banned</button>
-    </div>
-    <input id="sellerSearchInput" placeholder="🔍 Search sellers..." oninput="renderSellersTable()" style="padding:6px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;min-width:180px;">
-  </div>
-  <div class="admin-table-wrapper">
-    <table class="admin-table">
-      <thead><tr>
-        <th>#</th><th>Shop Name</th><th>Owner</th><th>Phone</th><th>City</th><th>GSTIN</th><th>Products</th><th>Status</th><th>Joined</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="adminSellersList" data-alias-id="adminSellerSubmissions"></tbody>
-    </table>
-  </div>
-  <!-- Add Seller Modal -->
-  <div style="margin-top:1.2rem;background:#f9f5f0;border-radius:12px;padding:1rem;border:1px solid #e0d5c5;">
-    <div style="font-weight:700;margin-bottom:0.8rem;font-size:0.9rem;">➕ Add New Seller</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0.6rem;">
-      <input id="ns_shop" placeholder="Shop Name *" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_owner" placeholder="Owner Name *" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_phone" placeholder="Phone *" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_city" placeholder="City" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_gstin" placeholder="GSTIN" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-      <input id="ns_email" placeholder="Email" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px;font-size:0.8rem;outline:none;">
-    </div>
-    <button onclick="addNewSeller()" style="margin-top:0.7rem;background:#d94030;color:white;border:none;border-radius:8px;padding:7px 18px;font-size:0.8rem;cursor:pointer;">✅ Add Seller</button>
-  </div>
-</div>
+<!-- ✅ FIX v46: Seller account/marketplace system poori tarah remove kiya (admin ke request par) -->
 
 
 <!-- ✅ NEW: Analytics Tab -->
@@ -4648,7 +4736,7 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
   <span id="lowStockItems" style="font-size:0.8rem;color:#555;"></span>
 </div>
 
-<div class="admin-table-wrapper"><table class="admin-table"><thead><tr><th>Image</th><th>Name</th><th>Price</th><th>Unit</th><th>Disc%</th><th>Disc. Price</th><th>Courier</th><th>📦 Stock Qty</th><th>HSN Code</th><th>GST %</th><th style="min-width:200px;">Description ✏️</th><th>COD</th><th>Active</th><th>Action</th></tr></thead><tbody id="adminProductsList"></tbody></table></div>
+<div class="admin-table-wrapper"><table class="admin-table"><thead><tr><th>↕️ Order</th><th>Image</th><th>Name</th><th>Price</th><th>Unit</th><th>Disc%</th><th>Disc. Price</th><th>Courier</th><th>📦 Stock Qty</th><th>HSN Code</th><th>GST %</th><th style="min-width:200px;">Description ✏️</th><th>COD</th><th>Active</th><th>Action</th></tr></thead><tbody id="adminProductsList"></tbody></table></div>
 <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;">
   <button class="save-btn" onclick="saveAllProducts()">💾 Save All Products</button>
   <button class="save-btn" onclick="resetProductImages()" style="background:#ff9800;">🔄 Reset Images</button>
@@ -5815,9 +5903,19 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
       <div id="importMsg" style="display:none;margin-top:0.5rem;padding:0.5rem 0.7rem;border-radius:8px;font-size:0.78rem;font-weight:600;"></div>
     </div>
 
+    <!-- ✅ FIX v46: OLD IMAGE COMPRESSION TOOL — purani uncompressed product images ko
+         resize+recompress karke Supabase mein wapas save karta hai. Ye sirf ek baar
+         chalane wala one-time maintenance tool hai, naye uploads pehle se hi compressed hote hain. -->
+    <div style="background:#fff3e0;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #ffcc80;">
+      <h4 style="margin-bottom:0.5rem;color:#e65100;">🗜️ Compress Old Product Images</h4>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Purane products ki bada size wali (uncompressed) images ko chota karke products load fast karne mein madad karta hai. Ek baar chalana kaafi hai — naye uploads pehle se compressed hote hain.</p>
+      <button onclick="compressOldProductImages()" id="compressImgBtn" style="width:100%;padding:0.6rem;background:#e65100;color:white;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:0.8rem;">🗜️ Scan &amp; Compress Now</button>
+      <div id="compressImgProgress" style="display:none;margin-top:0.6rem;font-size:0.75rem;color:#e65100;background:white;border-radius:8px;padding:0.6rem 0.7rem;border:1px solid #ffcc80;"></div>
+    </div>
+
     <div style="background:#fff0f8;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #ffccee;">
       <h4 style="margin-bottom:0.5rem;color:#cc3366;">🗑️ Data Reset</h4>
-      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Clear test data — Orders, Users, Bills, Enquiries, Sellers, and Distributors will be reset. Products will be preserved; stock will be set to zero.</p>
+      <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Clear test data — Orders, Users, Bills, Enquiries, and Distributors will be reset. Products will be preserved; stock will be set to zero.</p>
       <button onclick="clearAllTestData()" style="width:100%;padding:0.6rem;background:#cc3366;color:white;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:0.9rem;">🗑️ Reset All Test Data (Supabase + Cache)</button>
     </div>
     <div style="background:#e8f5e9;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #a5d6a7;">
@@ -6549,7 +6647,7 @@ function buildRetailCard(p) {
       <div>${p.courierCharge === 0 ? '✅ Free Delivery' : '🚚 Courier: +₹'+p.courierCharge}</div>
       <div>${p.inStock ? '✅ In Stock' : '❌ Out of Stock'}</div>
       <div style="color:${p.codAllowed!==false?'#d94030':'#ff4444'};font-weight:600;">${p.codAllowed!==false?'🏠 COD Available':'🚫 COD Not Available'}</div>
-      <div class="rating" style="margin-top:0.3rem;">${stars} (${p.ratingCount})</div>
+      ${p.ratingCount > 0 ? '<div class="rating" style="margin-top:0.3rem;">'+stars+' ('+p.ratingCount+')</div>' : '<div style="margin-top:0.3rem;font-size:0.7rem;color:#aaa;">No reviews yet</div>'}
       ${p.desc?'<div style="margin-top:0.3rem;white-space:pre-line;border-top:1px solid #f0ebe4;padding-top:0.3rem;">'+safeDesc+'</div>':''}
       <button onclick="event.stopPropagation();openProductModal('retail',${p.id})" style="margin-top:0.5rem;width:100%;background:#f0f7f0;color:#d94030;border:1px solid #c8e6c9;border-radius:10px;padding:0.4rem;font-size:0.72rem;cursor:pointer;font-weight:600;">🔍 Full Details / Buy Now</button>
     </div>
@@ -9099,8 +9197,7 @@ async function openAdminPanel() {
     sbLoadOrders().then(function(){ loadAdminOrders(); }); // ✅ FIX: Fresh Supabase fetch before render — stale in-memory se nahi
     loadBulkList(); loadAdminB2B(); loadSettingsForm();
     loadDealershipList(); // ✅ FIX 1: Dealership tab auto-load on panel open
-    updateSellerBadge();
-    if(typeof updateSellerProductBadge==='function') updateSellerProductBadge();
+    // ✅ FIX v46: Seller badge update calls removed — seller account system decommissioned
     await sbLoadBills();
     startAutoRefresh();
     setTimeout(refreshStockDashboard, 300);
@@ -9205,19 +9302,24 @@ function loadAdminProducts() {
                 <input class="admin-input" type="number" id="gstslab_${p.id}" value="${p.gstSlab!==undefined&&p.gstSlab!==null?p.gstSlab:5}" placeholder="GST%" min="0" max="28" step="0.1" style="width:60px;border:1px solid #ce93d8;font-size:0.72rem;text-align:center;">
                 <div style="font-size:0.55rem;color:#7b1fa2;margin-top:2px;text-align:center;">GST %</div>
             </td>
-            <td style="min-width:180px;max-width:220px;">
-    <textarea class="admin-input admin-input-desc" id="desc_${p.id}" rows="2" style="resize:vertical;min-height:48px;font-family:inherit;width:100%;box-sizing:border-box;font-size:0.72rem;">${esc(p.desc||"")}</textarea>
-    <button onclick="(function(btn,id){var el=document.getElementById('extraFields_'+id);var open=el.style.display!=='none';el.style.display=open?'none':'block';btn.textContent=open?'✏️ More Fields':'🔼 Hide Fields';})(this,${p.id})" style="margin-top:4px;width:100%;background:#f5f0ea;border:1px solid #d94030;color:#d94030;border-radius:6px;padding:2px 6px;font-size:0.62rem;font-weight:700;cursor:pointer;">✏️ More Fields</button>
-    <div id="extraFields_${p.id}" style="display:none;margin-top:4px;">
+            <td>
+    <textarea class="admin-input admin-input-desc" id="desc_${p.id}" rows="3" style="resize:vertical;min-height:60px;font-family:inherit;">${esc(p.desc||"")}</textarea>
+    <div style="margin-top:4px;">
         <div style="font-size:0.6rem;color:#d94030;font-weight:600;margin-bottom:2px;">✨ Highlights (one per line):</div>
-        <textarea class="admin-input" id="highlights_${p.id}" rows="3" style="resize:vertical;min-height:55px;font-family:inherit;font-size:0.65rem;width:100%;box-sizing:border-box;" placeholder="🌿 100% Natural&#10;🌾 Best taste&#10;💪 Rich antioxidants">${esc(p.highlights ? p.highlights.join("\n") : "")}</textarea>
-        <div style="font-size:0.6rem;color:#2c6e2c;font-weight:600;margin:4px 0 2px;">📦 Pack Info:</div>
+        <textarea class="admin-input" id="highlights_${p.id}" rows="4" style="resize:vertical;min-height:70px;font-family:inherit;font-size:0.65rem;" placeholder="🌿 100% Natural&#10;🌾 Best taste&#10;💪 Rich antioxidants">${esc(p.highlights ? p.highlights.join("\n") : "")}</textarea>
+    </div>
+    <div style="margin-top:4px;">
+        <div style="font-size:0.6rem;color:#2c6e2c;font-weight:600;margin-bottom:2px;">📦 Pack Info:</div>
         <input class="admin-input" id="packInfo_${p.id}" type="text" style="font-size:0.65rem;width:100%;box-sizing:border-box;" placeholder="e.g. 6 sachets × 30gm = 180gm" value="${esc(p.packInfo||'')}">
-        <div style="font-size:0.6rem;color:#1565c0;font-weight:600;margin:4px 0 2px;">🧪 Ingredients:</div>
-        <textarea class="admin-input" id="ingredients_${p.id}" rows="2" style="resize:vertical;min-height:45px;font-family:inherit;font-size:0.65rem;width:100%;box-sizing:border-box;" placeholder="e.g. Sattu, Jaljeera powder, Black salt...">${esc(p.ingredients||'')}</textarea>
-        <div style="font-size:0.6rem;color:#6200ea;font-weight:600;margin:4px 0 2px;">📊 Nutrition (CSV: Name,per100g,perServing):</div>
-        <textarea class="admin-input" id="nutrition_${p.id}" rows="3" style="resize:vertical;min-height:55px;font-family:monospace;font-size:0.62rem;width:100%;box-sizing:border-box;" placeholder="Protein,24.34,7.30&#10;Energy,381.62,114.48&#10;Fat,5.98,1.79&#10;Carbohydrate,57.61,17.28">${esc(p.nutrition && p.nutrition.rows ? p.nutrition.rows.map(r=>r.join(',')).join('\n') : '')}</textarea>
-        <div style="font-size:0.55rem;color:#888;margin-top:2px;">Per serving: <input class="admin-input" id="nutServing_${p.id}" type="text" style="font-size:0.62rem;width:55%;display:inline;" placeholder="per /30gm" value="${esc(p.nutrition&&p.nutrition.serving||'')}"></div>
+    </div>
+    <div style="margin-top:4px;">
+        <div style="font-size:0.6rem;color:#1565c0;font-weight:600;margin-bottom:2px;">🧪 Ingredients:</div>
+        <textarea class="admin-input" id="ingredients_${p.id}" rows="3" style="resize:vertical;min-height:55px;font-family:inherit;font-size:0.65rem;" placeholder="e.g. Sattu, Jaljeera powder, Black salt...">${esc(p.ingredients||'')}</textarea>
+    </div>
+    <div style="margin-top:4px;">
+        <div style="font-size:0.6rem;color:#6200ea;font-weight:600;margin-bottom:2px;">📊 Nutrition (CSV: Name,per100g,perServing):</div>
+        <textarea class="admin-input" id="nutrition_${p.id}" rows="4" style="resize:vertical;min-height:70px;font-family:monospace;font-size:0.62rem;" placeholder="Protein,24.34,7.30&#10;Energy,381.62,114.48&#10;Fat,5.98,1.79&#10;Carbohydrate,57.61,17.28">${esc(p.nutrition && p.nutrition.rows ? p.nutrition.rows.map(r=>r.join(',')).join('\n') : '')}</textarea>
+        <div style="font-size:0.55rem;color:#888;margin-top:2px;">Per serving label: <input class="admin-input" id="nutServing_${p.id}" type="text" style="font-size:0.62rem;width:60%;display:inline;" placeholder="per /30gm" value="${esc(p.nutrition&&p.nutrition.serving||'')}"></div>
     </div>
 </td>
             <td>
@@ -10997,7 +11099,7 @@ async function clearAllTestData() {
         db.from('bills').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('bulk_enquiries').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
         db.from('dealership_enquiries').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
-        db.from('sellers').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        // ✅ FIX v46: sellers table clear removed — seller account system decommissioned
         db.from('distributors').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
     ];
 
@@ -11147,282 +11249,12 @@ function switchTab(tab) {
     if(tab==="gst") { loadGSTReport(); gstPopulateYears(); gstSetPeriodMode('monthly'); }
     if(tab==="reports") { loadReports(); setTimeout(loadPnLStatement, 200); }
     if(tab==="settings") loadSettingsForm();
-    if(tab==="sellers") loadSellersTab();
+    // ✅ FIX v46: Seller tab routing removed — seller account system decommissioned
     // ✅ FIX v38: Ye tabs pehle sirf DOMContentLoaded patch mein the — ab directly yahan hain (reliable)
     if(tab==="analytics") setTimeout(function(){ loadAnalytics(7); }, 100);
     if(tab==="reviews") setTimeout(loadAdminReviews, 100);
     if(tab==="khata") setTimeout(function(){ if(typeof khataLoadSummary==='function') khataLoadSummary(); if(typeof khataLoadDropdown==='function') khataLoadDropdown(); }, 100);
 }
-// ── SELLERS MANAGEMENT (Supabase) ──
-let _sellersCache = [];
-let _sellerStatusFilter = 'all';
-
-async function sbLoadSellers() {
-    try {
-        const { data, error } = await db.from('sellers').select('*').order('created_at', { ascending: false });
-        if(error) throw error;
-        _sellersCache = (data || []).map(s => ({
-            id: s.id,
-            shopName: s.shop_name || '',
-            owner: s.owner_name || '',
-            phone: s.phone || '',
-            city: s.city || '',
-            gstin: s.gstin || '',
-            email: s.email || '',
-            status: s.status || 'pending',
-            productCount: s.product_count || 0,
-            joined: s.created_at ? new Date(s.created_at).toLocaleDateString('en-IN') : '—'
-        }));
-    } catch(e) {
-        console.log('Sellers load failed:', e.message);
-        _sellersCache = [];
-    }
-}
-
-function filterSellerStatus(status) {
-    _sellerStatusFilter = status;
-    renderSellersTable();
-}
-
-async function loadSellersTab() {
-    const tbody = document.getElementById('adminSellersList');
-    if(tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#aaa;">⏳ Loading...</td></tr>';
-    await sbLoadSellers();
-    renderSellersTable();
-    updateSellerBadge();
-}
-
-function updateSellerBadge() {
-    const pending = _sellersCache.filter(s => s.status === 'pending').length;
-    const badge = document.getElementById('sellerPendingBadge');
-    if(badge) { badge.textContent = pending; badge.style.display = pending > 0 ? 'inline' : 'none'; }
-}
-
-function renderSellersTable() {
-    const q = (document.getElementById('sellerSearchInput')||{}).value || '';
-    const filtered = _sellersCache.filter(s => {
-        const matchStatus = _sellerStatusFilter === 'all' || s.status === _sellerStatusFilter;
-        const matchQ = !q || (s.shopName+s.owner+s.phone+s.city+s.gstin).toLowerCase().includes(q.toLowerCase());
-        return matchStatus && matchQ;
-    });
-    const tbody = document.getElementById('adminSellersList');
-    if(!tbody) return;
-    if(!filtered.length) { tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#999;">No sellers found</td></tr>'; return; }
-    const statusStyle = { approved:'background:#e8f5e9;color:#2e7d32', pending:'background:#fff8e1;color:#f57f17', banned:'background:#f3e5f5;color:#6a1b9a', rejected:'background:#ffebee;color:#c62828' };
-    tbody.innerHTML = filtered.map((s,i) => `<tr>
-        <td style="color:#888">${i+1}</td>
-        <td><b>${esc(s.shopName)||'—'}</b></td>
-        <td>${esc(s.owner)||'—'}</td>
-        <td>${esc(s.phone)||'—'}</td>
-        <td>${esc(s.city)||'—'}</td>
-        <td style="font-size:0.72rem">${esc(s.gstin)||'—'}</td>
-        <td><span style="background:#e8f5e9;color:#2e7d32;border-radius:20px;padding:2px 8px;font-size:0.72rem;">${s.productCount} products</span></td>
-        <td><span style="border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;${statusStyle[s.status]||statusStyle.pending}">${esc(s.status)}</span></td>
-        <td style="font-size:0.72rem;color:#888">${esc(s.joined)}</td>
-        <td style="white-space:nowrap">
-            ${s.status==='pending'?`<button onclick="sellerUpdateStatus('${s.id}','approved')" style="background:#16a34a;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;margin-right:3px;">✓ Approve</button><button onclick="sellerUpdateStatus('${s.id}','rejected')" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">✗ Reject</button>`:''}
-            ${s.status==='approved'?`<button onclick="sellerUpdateStatus('${s.id}','banned')" style="background:#7c3aed;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">🚫 Ban</button>`:''}
-            ${(s.status==='rejected'||s.status==='banned')?`<button onclick="sellerUpdateStatus('${s.id}','approved')" style="background:#d94030;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;">↩ Restore</button>`:''}
-            <button onclick="sellerDelete('${s.id}')" style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;padding:3px 8px;font-size:0.72rem;cursor:pointer;margin-left:3px;">🗑️</button>
-        </td>
-    </tr>`).join('');
-}
-
-// ✅ FIX: confirm() hata diya — 2-step toast; restored msg bhi fix
-async function sellerUpdateStatus(id, status) {
-    if(status === 'banned') {
-        let key = '_banSeller_' + id;
-        if(!window[key]) {
-            window[key] = true;
-            showToast('⚠️ Seller ban karna hai? Click again to confirm.', '#ff9800');
-            setTimeout(function() { if(window[key]) window[key] = false; }, 4000);
-            return;
-        }
-        window[key] = false;
-    }
-    try {
-        const { error } = await db.from('sellers').update({ status }).eq('id', id);
-        if(error) throw error;
-        const s = _sellersCache.find(x => x.id == id);
-        if(s) s.status = status;
-        renderSellersTable(); updateSellerBadge();
-        const msgs = { approved:'✅ Seller approved!', rejected:'❌ Seller rejected!', banned:'🚫 Seller banned!', restored:'↩️ Seller restored!' };
-        showToast(msgs[status] || '✅ Done!');
-    } catch(e) { showToast('❌ Error: ' + e.message); }
-}
-
-async function sellerDelete(id) {
-    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // 🔧 FIX v41.2
-    // ✅ FIX: confirm() → 2-step toast
-    let _selDelKey = '_delSeller_' + id;
-    if(!window[_selDelKey]) {
-        window[_selDelKey] = true;
-        showToast('⚠️ Seller permanently delete karna hai? Click again to confirm.', '#ff9800');
-        setTimeout(function(){ window[_selDelKey]=false; }, 4000);
-        return;
-    }
-    window[_selDelKey] = false;
-    try {
-        const { error } = await db.from('sellers').delete().eq('id', id);
-        if(error) throw error;
-        _sellersCache = _sellersCache.filter(x => x.id != id);
-        renderSellersTable(); updateSellerBadge(); showToast('🗑️ Seller deleted!');
-    } catch(e) { showToast('❌ Error: ' + e.message); }
-}
-
-async function addNewSeller() {
-    const shop = document.getElementById('ns_shop').value.trim();
-    const owner = document.getElementById('ns_owner').value.trim();
-    const phone = document.getElementById('ns_phone').value.trim();
-    if(!shop || !owner || !phone) { showToast('Shop name, owner & phone required!'); return; }
-    try {
-        const row = {
-            shop_name: shop, owner_name: owner, phone,
-            city: document.getElementById('ns_city').value.trim(),
-            gstin: document.getElementById('ns_gstin').value.trim(),
-            email: document.getElementById('ns_email').value.trim(),
-            status: 'approved', product_count: 0
-        };
-        const { error } = await db.from('sellers').insert([row]);
-        if(error) throw error;
-        ['ns_shop','ns_owner','ns_phone','ns_city','ns_gstin','ns_email'].forEach(id => document.getElementById(id).value = '');
-        await sbLoadSellers(); renderSellersTable(); updateSellerBadge(); showToast('✅ Seller added!');
-    } catch(e) { showToast('❌ Error: ' + e.message); }
-}
-// ── SELLER PRODUCT SUBMISSIONS (ADMIN) ──
-let _sellerSubmissionsCache = [];
-
-async function adminLoadSellerSubmissions(filter) {
-    filter = filter || 'pending';
-    var el = document.getElementById('adminSellerSubmissions') || document.getElementById('sellerSubmissions') || document.getElementById('adminSellersList');
-    if(el) el.innerHTML = '<div style="color:#888;text-align:center;padding:1rem;">⏳ Loading...</div>';
-    try {
-        var q = db.from('seller_products').select('*').order('created_at', { ascending: false });
-        if(filter !== 'all') q = q.eq('status', filter);
-        var { data, error } = await q;
-        if(error) throw error;
-        _sellerSubmissionsCache = data || [];
-        adminRenderSellerSubmissions(filter);
-        updateSellerProductBadge();
-    } catch(e) {
-        if(el) el.innerHTML = '<div style="color:#dc2626;text-align:center;padding:1rem;">Error: ' + esc(e.message) + '</div>';
-    }
-}
-
-function adminRenderSellerSubmissions(filter) {
-    var el = document.getElementById('adminSellerSubmissions') || document.getElementById('sellerSubmissions') || document.getElementById('adminSellersList');
-    if(!el) return;
-    if(!_sellerSubmissionsCache.length) {
-        el.innerHTML = '<div style="color:#aaa;text-align:center;padding:0.8rem;font-size:0.82rem;">'
-            + (filter==='pending' ? '✅ Koi pending submission nahi hai.' : 'Koi record nahi mila.') + '</div>';
-        return;
-    }
-    var statusColor = { approved:'#16a34a', pending:'#e67e22', rejected:'#dc2626' };
-    var statusBg    = { approved:'#dcfce7', pending:'#fff3cd', rejected:'#fee2e2' };
-    el.innerHTML = _sellerSubmissionsCache.map(function(p) {
-        var imgHtml = (p.image_type==='upload' && p.image_value && p.image_value.length > 10)
-            ? '<img src="'+p.image_value+'" style="width:50px;height:50px;border-radius:8px;object-fit:cover;border:2px solid #c0caff;flex-shrink:0;">'
-            : '<div style="width:50px;height:50px;border-radius:8px;background:#f0f4ff;display:flex;align-items:center;justify-content:center;font-size:1.6rem;flex-shrink:0;">'+esc(p.image_value||'🛍️')+'</div>';
-        var date = p.created_at ? new Date(p.created_at).toLocaleDateString('en-IN') : '—';
-        var actionHtml = p.status === 'pending'
-            ? '<div style="display:flex;gap:0.4rem;margin-top:0.6rem;flex-wrap:wrap;align-items:center;">'
-              + '<button onclick="adminApproveSellerProduct('+p.id+')" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:4px 14px;font-size:0.75rem;cursor:pointer;font-weight:600;">✅ Approve & Publish</button>'
-              + '<input type="text" id="sreject_note_'+p.id+'" placeholder="Rejection reason..." style="flex:1;padding:4px 8px;font-size:0.72rem;border:1px solid #fca5a5;border-radius:8px;min-width:120px;outline:none;">'
-              + '<button onclick="adminRejectSellerProduct('+p.id+')" style="background:#dc2626;color:white;border:none;border-radius:8px;padding:4px 12px;font-size:0.75rem;cursor:pointer;font-weight:600;">❌ Reject</button>'
-              + '</div>'
-            : (p.admin_note ? '<div style="margin-top:0.4rem;background:#fff3cd;border-radius:6px;padding:3px 8px;font-size:0.7rem;color:#b45309;">📝 Note: '+esc(p.admin_note)+'</div>' : '');
-        return '<div style="background:white;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;border:1px solid #e8eeff;">'
-            + '<div style="display:flex;gap:0.7rem;align-items:flex-start;">'
-            + imgHtml
-            + '<div style="flex:1;min-width:0;">'
-            + '<div style="font-weight:700;font-size:0.88rem;color:#1a2a5a;">'+esc(p.name)+'</div>'
-            + '<div style="font-size:0.73rem;color:#555;">₹'+(p.price||0)+(p.category?' · <b>'+esc(p.category)+'</b>':'')+(p.stock_qty!=null?' · Stock: '+p.stock_qty:'')+'</div>'
-            + '<div style="font-size:0.7rem;color:#888;">🏪 '+esc(p.seller_shop||'Unknown')+' · '+date+'</div>'
-            + (p.description?'<div style="font-size:0.72rem;color:#777;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px;">'+esc(p.description)+'</div>':'')
-            + '</div>'
-            + '<span style="background:'+(statusBg[p.status]||'#f5f5f5')+';color:'+(statusColor[p.status]||'#555')+';border-radius:20px;padding:2px 8px;font-size:0.68rem;font-weight:700;white-space:nowrap;flex-shrink:0;">'
-            + (p.status==='approved'?'✅':p.status==='rejected'?'❌':'⏳')+' '+(p.status||'pending').toUpperCase()
-            + '</span></div>'
-            + actionHtml
-            + '</div>';
-    }).join('');
-}
-
-async function adminApproveSellerProduct(id) {
-    var p = _sellerSubmissionsCache.find(function(x){ return x.id==id; });
-    if(!p) return;
-    // ✅ 2-step confirm
-    var _key = '_approveSP_' + id;
-    if(!window[_key]) {
-        window[_key] = true;
-        showToast('⚠️ Click again to confirm and publish.', '#e67e22');
-        setTimeout(function(){ if(window[_key]) window[_key]=false; }, 4000);
-        return;
-    }
-    window[_key] = false;
-    try {
-        var productRow = {
-            name: p.name, price: p.price, mrp: p.mrp||p.price,
-            category: p.category||'', description: p.description||'',
-            image_type: p.image_type||'emoji', image_value: p.image_value||'🛍️',
-            in_stock: (p.stock_qty==null||p.stock_qty>0), stock_qty: p.stock_qty,
-            discount: p.discount||0, hsn_code: p.hsn_code||'',
-            gst_slab: p.gst_slab||5, courier_charge: p.courier_charge||40,
-            price_unit: p.price_unit||'', highlights: [], rating: 0, rating_count: 0, cod_allowed: true
-        };
-        if(productRow.image_value && productRow.image_value.length > 500000) {
-            productRow.image_value='🛍️'; productRow.image_type='emoji';
-        }
-        var { data: inserted, error: iErr } = await db.from('products').insert([productRow]).select();
-        if(iErr) throw iErr;
-        var { error: sErr } = await db.from('seller_products').update({ status:'approved' }).eq('id', id);
-        if(sErr) throw sErr;
-        // ✅ FIX: sellers.product_count increment karo
-        if(p.seller_id) {
-            var { data: sellerRow } = await db.from('sellers').select('product_count').eq('id', p.seller_id).maybeSingle();
-            var newCount = ((sellerRow && sellerRow.product_count) || 0) + 1;
-            await db.from('sellers').update({ product_count: newCount }).eq('id', p.seller_id);
-        }
-        if(inserted && inserted[0]) {
-            var np = inserted[0];
-            products.push({ id:np.id, name:np.name, price:np.price, mrp:np.mrp, category:np.category,
-                desc:np.description, imageType:np.image_type, imageValue:np.image_value,
-                inStock:np.in_stock, stockQty:np.stock_qty, discount:np.discount||0,
-                hsnCode:np.hsn_code||'', gstSlab:np.gst_slab||5, courierCharge:np.courier_charge||40,
-                priceUnit:np.price_unit||'', highlights:[], rating:0, ratingCount:0, codAllowed:true });
-            if(typeof displayProducts==='function') displayProducts();
-            if(typeof displayHomeProducts==='function') displayHomeProducts();
-        }
-        showToast('✅ Product approved & published!', '#16a34a');
-        adminLoadSellerSubmissions('pending');
-        loadAdminProducts();
-        updateSellerProductBadge();
-    } catch(e) { showToast('❌ Error: '+esc(e.message), '#dc2626'); }
-}
-
-async function adminRejectSellerProduct(id) {
-    var noteEl = document.getElementById('sreject_note_' + id);
-    var note   = noteEl ? noteEl.value.trim() : '';
-    try {
-        var { error } = await db.from('seller_products').update({ status:'rejected', admin_note:note }).eq('id', id);
-        if(error) throw error;
-        showToast('❌ Product rejected.', '#e67e22');
-        adminLoadSellerSubmissions('pending');
-        updateSellerProductBadge();
-    } catch(e) { showToast('❌ Error: '+esc(e.message), '#dc2626'); }
-}
-
-async function updateSellerProductBadge() {
-    try {
-        var { data } = await db.from('seller_products').select('id').eq('status','pending');
-        var count = (data||[]).length;
-        ['sellerProductBadge','sellerProductBadge2'].forEach(function(bid) {
-            var b = document.getElementById(bid);
-            if(b) { b.textContent=count; b.style.display=count>0?'inline':'none'; }
-        });
-    } catch(e) {}
-}
-// ── END SELLERS (ADMIN) ──
 
 
 
@@ -12568,7 +12400,7 @@ function filterAdminByCat(catName) {
         });
         // Fallback: search box mein category naam type karo
         if(!matched) {
-            let search = document.getElementById('adminSearchInput') || document.getElementById('productSearch') || document.getElementById('homeProductSearch') || document.getElementById('sellerSearchInput');
+            let search = document.getElementById('adminSearchInput') || document.getElementById('productSearch') || document.getElementById('homeProductSearch');
             if(search) { search.value = catName; search.dispatchEvent(new Event('input')); }
         }
     }, 300);
@@ -13769,23 +13601,31 @@ document.addEventListener('DOMContentLoaded', function() {
     }, { rootMargin: '500px 0px', threshold: 0 });
     
     // Watch for new images added dynamically
-    // ✅ FIX: Correct grid IDs — homeProductGrid, productGrid, b2bGrid, pscTrack
+    // ✅ FIX v46: Correct grid IDs — retailDynamicGrids/b2bDynamicGrids yahan missing the,
+    // isliye pehle poore document.body ko subtree:true se watch kiya ja raha tha (band-aid).
+    // Ye har chhote DOM change (toast, cart badge, admin typing) par poore page mein
+    // querySelectorAll chalata tha — yahi products/page ke slow hone ki asli wajah thi.
     function _observeAllDataSrc() {
         document.querySelectorAll('img[data-src]').forEach(function(img) {
             imgObserver.observe(img);
         });
     }
+    // ✅ FIX v46: Debounce — rapid mutations (chunked image load, multiple cards render)
+    // ek hi scan mein batch ho jaate hain, baar-baar nahi chalte
+    let _observeDebounceTimer = null;
     const mo = new MutationObserver(function() {
-        _observeAllDataSrc();
+        clearTimeout(_observeDebounceTimer);
+        _observeDebounceTimer = setTimeout(_observeAllDataSrc, 60);
     });
-    // ✅ FIX: Correct actual IDs in HTML
-    var _gridTargets = ['homeProductGrid','productGrid','b2bGrid','pscTrack','sm_sections_container','adminProductsList'];
+    // ✅ FIX v46: Actual container IDs jinme product/image cards render hote hain
+    // (retailDynamicGrids, b2bDynamicGrids add kiye — pehle missing the)
+    var _gridTargets = ['homeProductGrid','productGrid','retailDynamicGrids','b2bDynamicGrids','b2bGrid','pscTrack','sm_sections_container','adminProductsList'];
     _gridTargets.forEach(function(gid) {
         var gel = document.getElementById(gid);
         if(gel) mo.observe(gel, { childList: true, subtree: true });
     });
-    // Also watch body (subtree true) as final catch-all
-    mo.observe(document.body, { childList: true, subtree: true });
+    // ✅ FIX v46: document.body ka expensive catch-all hata diya — ab sirf zaroori
+    // grid containers hi observe hote hain, poora page nahi
     // Observe any images already in DOM at startup
     _observeAllDataSrc();
     // ✅ FIX: Re-observe after every displayHomeProducts / displayProducts call
@@ -14533,7 +14373,12 @@ function pbSaveBill() {
         notes: document.getElementById('pbNotes')?.value?.trim()||'',
         status: (payMode==='Credit'||payMode==='Udhaar') ? 'Unpaid' : 'Paid',
         amountPaid: (payMode==='Credit'||payMode==='Udhaar') ? 0 : grand,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        // ✅ FIX v46: Bill delete hone par stock reverse karne ke liye — pehle ye save
+        // nahi hota tha, isliye delete pe pata hi nahi chalta tha ki stock update hua
+        // tha ya nahi, retail tha ya wholesale — reverse karna possible hi nahi tha
+        stockUpdated: !!doStock,
+        stockType: stockType || 'retail'
     };
 
     let pbBills = _pbBills;
@@ -14720,6 +14565,32 @@ function pbDeleteBill(id) {
     let key = '_delPBBill_' + id;
     if(window[key]) {
         window[key] = false;
+        // ✅ FIX v46: Agar is bill se stock add hua tha (stockUpdated flag), delete karte
+        // waqt wo stock wapas minus karo — warna inventory permanently phoola reh jaata.
+        let _delPB = _pbBills.find(b => b.id === id);
+        if(_delPB && _delPB.stockUpdated && Array.isArray(_delPB.items)) {
+            let isB2B = _delPB.stockType === 'wholesale';
+            let arr = isB2B ? b2bProducts : products;
+            let reversed = [];
+            _delPB.items.forEach(function(it) {
+                let itemNameLower = (it.name||'').trim().toLowerCase();
+                let p = arr.find(x => x.name && x.name.trim().toLowerCase() === itemNameLower);
+                if(p && it.qty) {
+                    if(p.stockQty === null || p.stockQty === undefined) p.stockQty = 0;
+                    p.stockQty = Math.max(0, p.stockQty - it.qty);
+                    if(p.stockQty === 0) p.inStock = false;
+                    reversed.push(p.name + ' -' + it.qty);
+                    if(typeof _addLedgerEntry === 'function') _addLedgerEntry(p.id, p.name, isB2B, 'deduct', -it.qty, p.stockQty, 'Purchase Bill Deleted #' + id);
+                }
+            });
+            if(reversed.length) {
+                if(isB2B) saveB2B(); else saveProducts();
+                if(typeof displayProducts === 'function') displayProducts();
+                if(typeof displayB2B === 'function') displayB2B();
+                refreshStockDashboard();
+                showToast('↩️ Stock reversed: ' + reversed.join(', '), '#ff9800');
+            }
+        }
         let pbBills = _pbBills.filter(x => x.id !== id);
         _pbBills = pbBills;
         try { db.from('settings').upsert({key:'nexdrop_pb_bills',value:JSON.stringify(pbBills)},{onConflict:'key'}).then(function(r){if(r&&r.error)console.log('pbDeleteBill sync err:',r.error.message);}); } catch(e){}
@@ -14813,6 +14684,8 @@ function wiLoadFromCart() {
         let bp = b2bProducts.find(p => p.id === item.id);
         if(bp && inputs[1]) inputs[1].value = bp.hsnCode || '1108';
         if(bp && selects[1]) selects[1].value = String(bp.gstSlab !== undefined ? bp.gstSlab : 5);
+        // ✅ FIX v46: Cart se load hone par bhi productId capture karo (reliable stock match)
+        if(bp && inputs[0]) { inputs[0].setAttribute('data-product-id', bp.id); inputs[0].setAttribute('data-is-b2b', '1'); }
     });
     wiCalculateTotals();
     // Pre-fill customer from currentUser if logged in
@@ -14862,6 +14735,19 @@ function wiAutoFillHSN(input, rowNum) {
     if(prod && prod.hsnCode) {
         let hsnEl = document.getElementById('wiHSN_' + rowNum);
         if(hsnEl && !hsnEl.value) hsnEl.value = prod.hsnCode;
+    }
+    // ✅ FIX v46: Jab typed naam exact catalog product se match kare, uska productId
+    // input pe data-attribute mein save karo. Isse stock deduction/restore ab naam
+    // ki jagah reliable ID se match ho sakta hai (duplicate/renamed naam se safe).
+    // Agar naam match nahi karta (ya free-text one-off item hai), attribute clear
+    // kar do — taaki purana stale ID kabhi galat product se match na ho.
+    let b2bMatch = b2bProducts.find(p => p.name && p.name.trim().toLowerCase() === name);
+    if(b2bMatch) {
+        input.setAttribute('data-product-id', b2bMatch.id);
+        input.setAttribute('data-is-b2b', '1');
+    } else {
+        input.removeAttribute('data-product-id');
+        input.removeAttribute('data-is-b2b');
     }
 }
 
@@ -14966,7 +14852,10 @@ function wiCollectData() {
         let unit = selects[0]?.value || 'kg';
         let rate = parseFloat(inputs[3]?.value) || 0;
         let gstPct = parseFloat(selects[1]?.value) || 5;
-        if(name && qty > 0) items.push({ name, hsn, qty, unit, rate, gstPct });
+        // ✅ FIX v46: Reliable productId agar row ke input pe set hai (exact catalog match)
+        let productId = inputs[0]?.getAttribute('data-product-id');
+        productId = productId ? parseInt(productId) : null;
+        if(name && qty > 0) items.push({ name, hsn, qty, unit, rate, gstPct, productId });
     });
     // ✅ FIX: Buyer state — pehle dropdown se lo, agar blank hai to GSTIN se derive karo
     let gstVal = (document.getElementById('wiCustomerGST')?.value?.trim() || '');
@@ -15037,8 +14926,16 @@ function wiGenerateInvoice() {
     let stockDeducted = [];
     // ✅ FIX Audit W4: b2bRaw dead code removed — b2bProducts directly used
     d.items.forEach(item => {
-        let itemNameLower = item.name.trim().toLowerCase();
-        let matched = b2bProducts.find(p => p.name && p.name.trim().toLowerCase() === itemNameLower);
+        // ✅ FIX v46: productId reliable hai (autocomplete se capture hua) — pehle usi se
+        // match karo. Naam-match sirf fallback hai un free-text/legacy items ke liye
+        // jinke liye productId capture nahi hua (catalog se bahar ka one-off item ya
+        // purana saved invoice format).
+        let matched = null;
+        if(item.productId) matched = b2bProducts.find(p => p.id === item.productId);
+        if(!matched) {
+            let itemNameLower = item.name.trim().toLowerCase();
+            matched = b2bProducts.find(p => p.name && p.name.trim().toLowerCase() === itemNameLower);
+        }
         if(matched) {
             // agar stockQty null/undefined hai to 0 se start karo
             if(matched.stockQty === null || matched.stockQty === undefined) matched.stockQty = 0;
@@ -15046,6 +14943,9 @@ function wiGenerateInvoice() {
             matched.stockQty = Math.max(0, matched.stockQty - item.qty);
             if(matched.stockQty === 0) matched.inStock = false;
             stockDeducted.push(`${matched.name}: ${before} → ${matched.stockQty}`);
+            // ✅ FIX v46: Stock ledger mein audit trail — pehle sirf retail orders/purchase
+            // bills log hote the, wholesale invoice deduction ledger se missing tha
+            if(typeof _addLedgerEntry === 'function') _addLedgerEntry(matched.id, matched.name, true, 'deduct', -item.qty, matched.stockQty, 'Wholesale Invoice #' + invNo);
         }
     });
     // ✅ FIX v36.19.9: N+1 bug — sbSaveProduct loop hata diya, saveB2B() bulk upsert use karo
@@ -15466,6 +15366,35 @@ function wiDeleteBill(id) {
         return;
     }
     window[_wiDelKey] = false;
+    // ✅ FIX v46: Invoice delete pe stock wapas karo — generate ke time jo B2B product
+    // ka stock minus hua tha (matched by name), wahi yahan restore karo. Ye retail
+    // orders (deleteOrder) mein pehle se implemented pattern hai; wholesale invoices
+    // mein ye missing tha, isliye delete karne par stock permanently kam reh jaata tha.
+    let _delBill = _wiBills.find(b => b.id === id);
+    if(_delBill && _delBill.data && Array.isArray(_delBill.data.items)) {
+        let restored = [];
+        _delBill.data.items.forEach(function(item) {
+            // ✅ FIX v46: productId se pehle match karo (reliable), naam fallback ke liye
+            let matched = null;
+            if(item.productId) matched = b2bProducts.find(p => p.id === item.productId);
+            if(!matched) {
+                let itemNameLower = (item.name||'').trim().toLowerCase();
+                matched = b2bProducts.find(p => p.name && p.name.trim().toLowerCase() === itemNameLower);
+            }
+            if(matched && item.qty) {
+                if(matched.stockQty === null || matched.stockQty === undefined) matched.stockQty = 0;
+                matched.stockQty += item.qty;
+                matched.inStock = true;
+                restored.push(matched.name + ' +' + item.qty);
+                if(typeof _addLedgerEntry === 'function') _addLedgerEntry(matched.id, matched.name, true, 'add', item.qty, matched.stockQty, 'Wholesale Invoice Deleted #' + id);
+            }
+        });
+        if(restored.length) {
+            saveB2B();
+            refreshStockDashboard();
+            showToast('↩️ Stock restored: ' + restored.join(', '), '#ff9800');
+        }
+    }
     let wiBills = _wiBills;
     wiBills = wiBills.filter(b => b.id !== id);
     _wiBills = wiBills;
@@ -15560,6 +15489,10 @@ function addUnit(type) {
     showToast(`✅ ${val} unit added!`, '#d94030');
 }
 function deleteUnit(type, unit) {
+    // ✅ FIX v46: Admin guard missing tha — sab dusre admin delete functions (deleteProduct,
+    // deleteB2B, deleteSupplier, etc.) mein ye check hai, deleteUnit mein reh gaya tha.
+    // Bina iske koi bhi (non-admin) browser console se deleteUnit() call karke unit mita sakta tha.
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     // ✅ FIX: Confirm dialog — accidental delete se bachao
     // ✅ FIX: confirm() → 2-step toast
     let _unitDelKey = '_delUnit_' + unit;
@@ -16302,6 +16235,9 @@ function loadCategoryTagsList() {
 
 // ✅ FIX: prompt() → inline modal input
 function renameCategory(i) {
+    // ✅ FIX v46: Admin guard missing tha — poore codebase mein har destructive/write
+    // admin function ye check karta hai, category management block mein chhoot gaya tha
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let cats = getCategories();
     let oldName = cats[i];
 
@@ -16368,6 +16304,8 @@ function renameCategory(i) {
 }
 
 function addCategoryTag() {
+    // ✅ FIX v46: Admin guard missing tha
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let inp = document.getElementById('newCategoryInput');
     let val = (inp?.value || '').trim();
     if(!val) { showToast('❌ Please enter a category name!', '#ff4444'); return; }
@@ -16390,6 +16328,9 @@ function addCategoryTag() {
 }
 
 function removeCategoryTag(i) {
+    // ✅ FIX v46: Admin guard missing tha — sabse critical, kyunki ye poori category
+    // AUR uske saare retail/B2B products permanently delete karta hai
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let cats = getCategories();
     // ✅ FIX: Confirm dialog — accidental delete se bachao
     // ✅ FIX: confirm() → 2-step toast
@@ -16451,6 +16392,8 @@ function removeCategoryTag(i) {
 
 // Add Product form se inline new category create karo
 function inlineAddCategory() {
+    // ✅ FIX v46: Admin guard missing tha
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let inp = document.getElementById('inlineCatInput');
     let val = (inp?.value || '').trim();
     if(!val) { showToast('❌ Please enter a category name!', '#ff4444'); return; }
@@ -17039,7 +16982,17 @@ function renderHomepageReviews() {
     let grid = document.getElementById('dynamicReviewsGrid');
     if(!grid) return;
     let reviews = getReviews().filter(r => r.status === 'approved');
-    if(!reviews.length) { grid.innerHTML = ''; return; }
+    let ratingEl = document.getElementById('homepageRatingDisplay');
+    let countEl = document.getElementById('homepageReviewCount');
+    // ✅ FIX v46: Poora section ab 100% dynamic — koi hardcoded/fake baseline nahi.
+    // Agar abhi tak koi approved review nahi hai, honest empty-state dikhao
+    // (fake "4.8 ★ / 1000+ Happy Customers" hata diya).
+    if(!reviews.length) {
+        grid.innerHTML = '<div id="noReviewsMsg" style="grid-column:1/-1;text-align:center;padding:2rem 1rem;color:#9a8f7f;font-size:0.85rem;">⭐ Abhi tak koi review nahi — pehla review aap dein!</div>';
+        if(ratingEl) ratingEl.textContent = '— ★';
+        if(countEl) countEl.textContent = 'No reviews yet';
+        return;
+    }
     let colors = ['#d94030','#f4884a','#8b1a10','#8d6e63','#546e7a','#6a4c93'];
     grid.innerHTML = reviews.map((r, i) => {
         let stars = '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating);
@@ -17058,16 +17011,11 @@ function renderHomepageReviews() {
             <div style="position:absolute;top:1rem;right:1rem;background:#e8f5e9;color:#d94030;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">✅ Verified</div>
         </div>`;
     }).join('');
-    // Rating update karo — static reviews (6) + dynamic approved reviews
-    const STATIC_REVIEW_COUNT = 6;
-    const STATIC_REVIEW_SUM = 29; // Rahul(5)+Priya(5)+Amit(5)+Sunita(4)+Mohammad(5)+Kavita(5)
+    // ✅ FIX v46: Rating/count ab sirf real approved reviews se — koi fake baseline mix nahi
     const dynamicSum = reviews.reduce((s,r) => s + r.rating, 0);
-    const totalCount = reviews.length + STATIC_REVIEW_COUNT;
-    const totalAvg = totalCount ? ((dynamicSum + STATIC_REVIEW_SUM) / totalCount).toFixed(1) : '4.8';
-    let ratingEl = document.getElementById('homepageRatingDisplay');
-    let countEl = document.getElementById('homepageReviewCount');
+    const totalAvg = (dynamicSum / reviews.length).toFixed(1);
     if(ratingEl) ratingEl.textContent = totalAvg + ' ★';
-    if(countEl) countEl.textContent = totalCount + ' Verified Customer Review' + (totalCount > 1 ? 's' : '');
+    if(countEl) countEl.textContent = reviews.length + ' Verified Customer Review' + (reviews.length > 1 ? 's' : '');
 }
 
 // ──────────────────────────────────────────────
@@ -19819,6 +19767,8 @@ function catEditUpdateDisc(tab, id) {
 }
 
 function catEditUploadPhoto(tab, id, input) {
+    // ✅ FIX v46: Admin guard missing tha
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let file = input.files[0];
     if(!file) return;
     let prefix = tab === 'b2b' ? 'ceb2b' : 'ce';
