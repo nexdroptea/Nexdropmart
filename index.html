@@ -5820,8 +5820,15 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
       <h4 style="margin-bottom:0.8rem;color:#d94030;">🏷️ Category Management</h4>
       <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.8rem;">Manage product categories. These categories will appear in the Add Product form.</p>
       <div id="categoryTagsList" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.5rem;min-height:30px;"></div>
-      <div style="display:flex;gap:0.4rem;">
-        <input type="text" id="newCategoryInput" placeholder="New Category (e.g. Makhana, Gift, Spices)" style="flex:1;padding:0.4rem 0.6rem;border:1px solid #a5d6a7;border-radius:8px;font-size:0.78rem;">
+      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+        <input type="text" id="newCategoryInput" placeholder="New Category (e.g. Makhana, Gift, Spices)" style="flex:1;min-width:140px;padding:0.4rem 0.6rem;border:1px solid #a5d6a7;border-radius:8px;font-size:0.78rem;">
+        <!-- ✅ FIX v46: Category type selector — pehle har category hamesha Retail+Wholesale
+             dono ek saath ban jaati thi, ab admin choose kar sakta hai kaun sa banana hai -->
+        <select id="newCategoryType" style="padding:0.4rem 0.5rem;border:1px solid #a5d6a7;border-radius:8px;font-size:0.75rem;background:white;">
+          <option value="both">🔀 Retail + Wholesale</option>
+          <option value="retail">🛒 Retail only</option>
+          <option value="wholesale">🏭 Wholesale only</option>
+        </select>
         <button onclick="addCategoryTag()" style="background:#d94030;color:white;border:none;padding:0.4rem 0.9rem;border-radius:8px;font-size:0.75rem;cursor:pointer;font-weight:600;">+ Add</button>
       </div>
     </div>
@@ -8180,6 +8187,19 @@ function submitDealershipForm() {
 
     showToast('✅ Dealership application submitted! Our team will contact you within 24–48 hours.', '#d94030');
 }
+// ✅ FIX v46 SECURITY: Pehle esc(e.name) onclick attribute mein use ho raha tha, lekin
+// HTML entity decoding JS-eval se PEHLE hoti hai — isliye esc() se escaped apostrophe
+// (&#39;) bhi wapas ' ban ke JS string literal tod sakta tha (crafted naam se JS
+// injection possible tha, click-triggered). Ab safe hai — ID-based lookup, koi
+// string-interpolation risk nahi.
+function waFollowUpDealer(id) {
+    let e = dealershipEnquiries.find(x => x.id === id);
+    if(!e) return;
+    let phone = (e.phone||'').replace(/\D/g,'');
+    if(phone.length === 10) phone = '91' + phone;
+    let msg = 'Dear ' + e.name + ', This is a follow-up regarding your Makhanaz Dealership Application.';
+    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
+}
 function loadDealershipList(filterStatus) {
     let el = document.getElementById('dealershipList');
     if(!el) return;
@@ -8223,7 +8243,7 @@ function loadDealershipList(filterStatus) {
                     <option value="approved" ${stage==='approved'?'selected':''}>✅ Approved</option>
                     <option value="rejected" ${stage==='rejected'?'selected':''}>❌ Rejected</option>
                 </select>
-                <button onclick="window.open('https://wa.me/91${e.phone.replace(/\D/g,'')}?text='+encodeURIComponent('Dear ${esc(e.name)}, This is a follow-up regarding your Makhanaz Dealership Application.'),'_blank')" style="background:#25D366;color:white;border:none;padding:0.35rem 0.7rem;border-radius:8px;font-size:0.68rem;cursor:pointer;font-weight:600;">💬 WA</button>
+                <button onclick="waFollowUpDealer('${e.id}')" style="background:#25D366;color:white;border:none;padding:0.35rem 0.7rem;border-radius:8px;font-size:0.68rem;cursor:pointer;font-weight:600;">💬 WA</button>
                 <button onclick="deleteDealershipEnquiry(${e.id})" style="background:#ff525222;color:#ff5252;border:1px solid #ff5252;border-radius:8px;padding:0.35rem 0.6rem;font-size:0.68rem;cursor:pointer;">🗑️</button>
             </div>
             <div style="margin-top:0.5rem;display:flex;gap:0.4rem;">
@@ -10474,6 +10494,20 @@ function saveAdminEditUser() {
     showToast('✅ User updated: '+esc(newName),'#d94030');
     loadAdminUsers();
 }
+// ✅ FIX v46 SECURITY: Bulk enquiry customer ka naam pehle onclick attribute mein
+// bina escape kiye seedha JS string mein interpolate ho raha tha — customer khud
+// apna naam control karta hai (public form), isliye crafted naam se stored XSS
+// possible tha (admin panel khulte hi execute ho jaata, click ki zaroorat bhi nahi).
+// Ab safe hai — sirf numeric/string ID attribute mein jaata hai, actual data
+// JS memory (bulkEnquiries array) se lookup hota hai, kabhi HTML mein round-trip nahi hota.
+function waFollowUpBulk(id) {
+    let e = bulkEnquiries.find(x => x.id === id);
+    if(!e) return;
+    let phone = (e.phone||'').replace(/\D/g,'');
+    if(phone.length === 10) phone = '91' + phone;
+    let msg = 'Dear ' + e.name + ', Thank you for your bulk enquiry at Makhanaz. Please share your requirements and we will send you the best price.';
+    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(msg), '_blank');
+}
 function loadBulkList() {
     let html = '';
     for(let e of bulkEnquiries) {
@@ -10489,7 +10523,7 @@ function loadBulkList() {
                 <span style="background:${sc}22;color:${sc};padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;white-space:nowrap;">${esc(e.status||'New')}</span>
             </div>
             <div style="display:flex;gap:0.4rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center;">
-                <button onclick="window.open('https://wa.me/91${e.phone.replace(/\D/g,'')}?text='+encodeURIComponent('Dear '+e.name+', Thank you for your bulk enquiry at Makhanaz. Please share your requirements and we will send you the best price.'),'_blank')" style="background:#25D366;color:white;border:none;padding:0.25rem 0.6rem;border-radius:8px;font-size:0.68rem;cursor:pointer;font-weight:600;">💬 WhatsApp</button>
+                <button onclick="waFollowUpBulk('${e.id}')" style="background:#25D366;color:white;border:none;padding:0.25rem 0.6rem;border-radius:8px;font-size:0.68rem;cursor:pointer;font-weight:600;">💬 WhatsApp</button>
                 <select onchange="updateBulkStatus(${e.id}, this.value)" style="padding:0.25rem 0.4rem;border:1px solid #ddd;border-radius:8px;font-size:0.68rem;">
                     <option ${e.status==='New'?'selected':''} value="New">🆕 New</option>
                     <option ${e.status==='Contacted'?'selected':''} value="Contacted">📞 Contacted</option>
@@ -16313,10 +16347,18 @@ function addCategoryTag() {
     let baseName = val.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
     let retailName = 'Retail ' + baseName;
     let wholesaleName = 'Wholesale ' + baseName;
+    // ✅ FIX v46: Ab admin choose kar sakta hai — sirf Retail, sirf Wholesale, ya dono.
+    // Pehle hamesha dono ek saath ban jaate the, chahe zaroorat ek hi ki ho.
+    let typeSel = document.getElementById('newCategoryType');
+    let type = typeSel ? typeSel.value : 'both';
     let cats = getCategories();
     let added = [];
-    if(!cats.find(c => c.toLowerCase() === retailName.toLowerCase())) { cats.push(retailName); added.push(retailName); }
-    if(!cats.find(c => c.toLowerCase() === wholesaleName.toLowerCase())) { cats.push(wholesaleName); added.push(wholesaleName); }
+    if(type === 'retail' || type === 'both') {
+        if(!cats.find(c => c.toLowerCase() === retailName.toLowerCase())) { cats.push(retailName); added.push(retailName); }
+    }
+    if(type === 'wholesale' || type === 'both') {
+        if(!cats.find(c => c.toLowerCase() === wholesaleName.toLowerCase())) { cats.push(wholesaleName); added.push(wholesaleName); }
+    }
     if(added.length === 0) { showToast('⚠️ This category already exists!', '#ff9800'); return; }
     saveCategories(cats);
     if(inp) inp.value = '';
@@ -16324,7 +16366,7 @@ function addCategoryTag() {
     populateCategoryDropdowns();
     if(typeof loadStockManager === 'function') loadStockManager();
     if(typeof updateStats === 'function') updateStats();
-    showToast('✅ "' + retailName + '" & "' + wholesaleName + '" both added successfully!', '#d94030');
+    showToast('✅ "' + added.join('" & "') + '" added successfully!', '#d94030');
 }
 
 function removeCategoryTag(i) {
@@ -16400,12 +16442,13 @@ function inlineAddCategory() {
     // Strip prefix if user already typed it
     let baseName = val.replace(/^Retail\s+/i,'').replace(/^Wholesale\s+/i,'').trim();
     let retailName = 'Retail ' + baseName;
-    let wholesaleName = 'Wholesale ' + baseName;
+    // ✅ FIX v46: Ye quick-add sirf Retail "Add Product" form ke andar use hota hai,
+    // isliye ab sirf Retail category banti hai — pehle har baar Wholesale wali bhi
+    // bin-zaroorat ban jaati thi (orphan/empty categories clutter karti thi).
+    // Wholesale category banani ho toh Settings → Category Management mein
+    // "Wholesale only" option se bana sakte hain.
     let cats = getCategories();
-    let added = [];
-    if(!cats.find(c => c.toLowerCase() === retailName.toLowerCase())) { cats.push(retailName); added.push(retailName); }
-    if(!cats.find(c => c.toLowerCase() === wholesaleName.toLowerCase())) { cats.push(wholesaleName); added.push(wholesaleName); }
-    if(added.length === 0) {
+    if(cats.find(c => c.toLowerCase() === retailName.toLowerCase())) {
         showToast('⚠️ This category already exists!', '#ff9800');
         // Auto-select Retail version in dropdown
         let sel = document.getElementById('newCategory');
@@ -16413,6 +16456,7 @@ function inlineAddCategory() {
         if(inp) inp.value = '';
         return;
     }
+    cats.push(retailName);
     saveCategories(cats);
     loadCategoryTagsList();
     populateCategoryDropdowns();
@@ -16424,7 +16468,7 @@ function inlineAddCategory() {
         if(sel) { for(let o of sel.options) { if(o.value === retailName) { sel.value = retailName; break; } } }
     }, 100);
     if(inp) inp.value = '';
-    showToast('✅ "' + retailName + '" & "' + wholesaleName + '" categories created!', '#d94030');
+    showToast('✅ "' + retailName + '" category created!', '#d94030');
 }
 
 function populateCategoryDropdowns() {
