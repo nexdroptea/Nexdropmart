@@ -5044,7 +5044,7 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
           <button onclick="adminSaveOutstanding()"
             style="background:#dc2626;color:white;border:none;padding:0.5rem 1.2rem;border-radius:10px;font-weight:700;font-size:0.82rem;cursor:pointer;">💾 Update</button>
         </div>
-        <div style="font-size:0.64rem;color:#aaa;margin-top:4px;">Direct DB override — distributors table pe update hoga.</div>
+        <div style="font-size:0.64rem;color:#aaa;margin-top:4px;">Direct DB override — updates the distributors table directly.</div>
       </div>
 
       <!-- Manual Ledger Entry -->
@@ -5187,7 +5187,7 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
               <option value="Bank Transfer">🏦 Bank Transfer</option>
               <option value="Cheque">📄 Cheque</option>
               <option value="Credit">🕐 Credit</option>
-              <option value="Udhaar">📝 Udhaar</option>
+              <option value="Udhaar">📝 On Credit</option>
             </select>
           </div>
         </div>
@@ -5471,7 +5471,7 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
             <div style="font-size:0.78rem;color:#6b5e4a;" id="khataInfoPhone">—</div>
           </div>
           <div style="text-align:right;">
-            <div style="font-size:0.75rem;color:#6b5e4a;">Net Balance (Baaki)</div>
+            <div style="font-size:0.75rem;color:#6b5e4a;">Net Balance (Outstanding)</div>
             <div id="khataInfoBalance" style="font-size:1.4rem;font-weight:700;color:#c62828;">₹0</div>
             <div id="khataInfoStatus" style="font-size:0.72rem;font-weight:600;"></div>
           </div>
@@ -5484,8 +5484,8 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
         <div style="font-weight:700;color:#1e2a2a;margin-bottom:0.6rem;font-size:0.85rem;">➕ Add New Entry</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0.5rem;">
           <select id="khataEntryType" style="padding:0.45rem 0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.8rem;">
-            <option value="debit">📤 Debit (Udhaar diya)</option>
-            <option value="credit">📥 Credit (Payment mila)</option>
+            <option value="debit">📤 Debit (Credit Given)</option>
+            <option value="credit">📥 Credit (Payment Received)</option>
           </select>
           <input type="number" id="khataEntryAmount" placeholder="Amount (₹) *" min="1" style="padding:0.45rem 0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.8rem;">
           <input type="text" id="khataEntryNote" placeholder="Note (e.g. Invoice #, cheque no)" style="padding:0.45rem 0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.8rem;">
@@ -5829,7 +5829,7 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
 
       <div style="margin-bottom:0.7rem;">
         <label style="font-size:0.75rem;font-weight:600;color:#1565c0;display:block;margin-bottom:4px;">🏭 What We Offer — Cards (JSON format)</label>
-        <div style="font-size:0.68rem;color:#888;margin-bottom:4px;">Har card: icon, title, desc, color, bg fields chahiye</div>
+        <div style="font-size:0.68rem;color:#888;margin-bottom:4px;">Each card requires: icon, title, description, color, and background fields</div>
         <textarea id="settingOfferCards" rows="6" placeholder='[{"icon":"🌾","title":"Product Name","desc":"Description","color":"#d94030","bg":"linear-gradient(135deg,#fff3e0,#ffe0cc)"}]' style="width:100%;padding:0.45rem 0.6rem;border:1px solid #90caf9;border-radius:8px;font-size:0.72rem;resize:vertical;font-family:monospace;box-sizing:border-box;"></textarea>
 
       <!-- ── About Page Extended Settings ── -->
@@ -6579,7 +6579,7 @@ function updateStats() {
         if(uncatWhole  > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:2px dashed #ff9800;min-width:110px;cursor:pointer;" onclick="window._cleanupOrphanProducts('wholesale')" title="Click to cleanup"><div class="stat-number" style="font-size:1.5rem;color:#e65100;">${uncatWhole}</div><div style="font-size:0.7rem;color:#bf360c;font-weight:600;">⚠️ Other<br><span style="font-size:0.62rem;opacity:0.8;">Wholesale (cleanup)</span></div></div>`;
         window._cleanupOrphanProducts = function(type) {
             let arr = type === 'retail' ? (window._orphanRetail||[]) : (window._orphanWhole||[]);
-            if(!arr.length) { showToast('✅ Koi orphan product nahi!', '#d94030'); return; }
+            if(!arr.length) { showToast('✅ No orphan products found!', '#d94030'); return; }
             let names = arr.map(function(p){ return p.name; }).slice(0,5).join(', ') + (arr.length>5?' ...':'');
             let key = '_orphanClean_' + type;
             if(!window[key]) {
@@ -7475,7 +7475,7 @@ function renderExtraImgPreview(type, id) {
             <img src="${img}" style="width:40px;height:40px;object-fit:cover;border-radius:5px;border:1px solid #ddd;">
             <button onclick="removeExtraImg('${type}',${id},${i})" style="position:absolute;top:-4px;right:-4px;background:#ff4444;color:white;border:none;border-radius:50%;width:15px;height:15px;font-size:0.55rem;cursor:pointer;line-height:1;padding:0;">✕</button>
         </div>`
-    ).join('') + (imgs.length < 5 ? '<div style="font-size:0.58rem;color:#999;margin-top:2px;">'+(5-imgs.length)+' aur add kar sakte ho</div>' : '');
+    ).join('') + (imgs.length < 5 ? '<div style="font-size:0.58rem;color:#999;margin-top:2px;">You can add '+(5-imgs.length)+' more</div>' : '');
 }
 
 // ==================== END PRODUCT MODAL & MULTI-IMAGE ====================
@@ -8756,7 +8756,7 @@ async function userRegister() {
     if(!/[!@#$%^&*]/.test(pass)) { showToast('❌ Password must contain at least 1 special character (!@#$%^&*)!', '#ff4444'); return; }
     // Email duplicate check — in-memory + Supabase both
     let existing = users.find(u => (u.email||'').toLowerCase() === email);
-    if(existing) { showToast('❌ Yeh email already registered hai! Please log in.', '#ff4444'); showLoginForm(); return; }
+    if(existing) { showToast('❌ This email is already registered! Please log in.', '#ff4444'); showLoginForm(); return; }
     // Phone duplicate check
     let phoneClean = phone.replace(/\D/g,'');
     let phoneExisting = users.find(u => u.phone && u.phone.replace(/\D/g,'') === phoneClean);
@@ -8767,7 +8767,7 @@ async function userRegister() {
     try {
         // Email check
         const { data: sbEmail } = await db.from('users').select('email').eq('email', email).maybeSingle();
-        if(sbEmail) { showToast('❌ Yeh email already registered hai! Please log in.', '#ff4444'); showLoginForm(); return; }
+        if(sbEmail) { showToast('❌ This email is already registered! Please log in.', '#ff4444'); showLoginForm(); return; }
         // Phone check — last 10 digits match (country code prefix handle)
         const { data: sbPhones } = await db.from('users').select('phone').ilike('phone', '%' + phoneClean.slice(-10));
         if(sbPhones && sbPhones.length > 0) {
@@ -9010,7 +9010,7 @@ function saveProfile() {
     // Phone duplicate check (apna khud ka number exclude karo)
     let phoneClean = phone.replace(/\D/g,'');
     let phoneDuplicate = users.find(u => u.email !== currentUser.email && u.phone && u.phone.replace(/\D/g,'') === phoneClean);
-    if(phoneDuplicate) { showToast('❌ Yeh mobile number already kisi aur account se registered hai!', '#ff4444'); return; }
+    if(phoneDuplicate) { showToast('❌ This mobile number is already registered with another account!', '#ff4444'); return; }
     let oldEmail = currentUser.email;
     currentUser.name = name;
     currentUser.phone = phone;
@@ -10088,6 +10088,13 @@ function updateStatus(id, status) {
     let o = orders.find(o => o.id === id);
     if(!o) return;
     let prevStatus = o.status;
+    // ✅ FIX ORD-1: Delivered order ka status ab badla nahi ja sakta (Cancel included) —
+    // product customer tak pahunch chuka hota hai, isliye status-change se stock galat restore ho jaata tha.
+    if(prevStatus === 'Delivered' && status !== 'Delivered') {
+        showToast('⛔ Status of a Delivered order cannot be changed — the product has already been delivered!', '#c62828');
+        if(typeof loadAdminOrders === 'function') loadAdminOrders(); // dropdown ko wapas "Delivered" pe reset karo
+        return;
+    }
     o.status = status;
     // ── AUTO BILL SEND WHEN CONFIRMED ──
     if(status === 'Confirmed' && prevStatus !== 'Confirmed') {
@@ -10640,7 +10647,7 @@ function saveAdminEditUser() {
     let newName = document.getElementById('editUserName').value.trim();
     let newPhone = document.getElementById('editUserPhone').value.trim();
     let newAddr = document.getElementById('editUserAddress').value.trim();
-    if(!newName){showToast('❌ Name required hai!','#c62828');return;}
+    if(!newName){showToast('❌ Name is required!','#c62828');return;}
     u.name = newName;
     u.phone = newPhone;
     u.address = newAddr;
@@ -11605,9 +11612,9 @@ function applyBRCMTemplate() {
     var wa = settings.whatsappNo || '';
     var msg = "";
     var _cn = (settings&&settings.companyName)||'Makhanaz';
-    if(t==="promo") msg = "🎉 *"+_cn+" - Special Offer!*\n\nNamaste! Aaj hamare paas ekdum khaas offer hai 🌾\n\n✅ Buy 2 Get 1 FREE on selected grades!\n✅ Free delivery above ₹999\n✅ COD Available\n\n🛒 Order Now: https://wa.me/"+wa+"\n\n- Team "+_cn+" 🌾";
-    else if(t==="stock") msg = "📦 *New Stock Arrived at "+_cn+"!*\n\nFresh premium makhanas aa gayi hain:\n\n🌾 7 Suta Premium Makhana\n🌾 7 Suta Premium\n🌾 6 Suta Standard\n🌸 Kashmiri Kahwa\n\n🚚 Free delivery above ₹999\n📦 COD Available\n\n📞 Order: https://wa.me/"+wa+"\n- Team "+_cn;
-    else if(t==="festive") msg = "🪔 *"+_cn+" wishes you Happy Celebrations!*\n\nIs tyohar mein aapko bahut badhaai! 🎉\n\n🎁 Special Festival Offers:\n✅ Upto 25% off on all grades\n✅ Free delivery above ₹999\n\nOrder: https://wa.me/"+wa+"\n\n- Team "+_cn+" 🌾";
+    if(t==="promo") msg = "🎉 *"+_cn+" - Special Offer!*\n\nHello! We have an exclusive offer just for you today 🌾\n\n✅ Buy 2 Get 1 FREE on selected grades!\n✅ Free delivery above ₹999\n✅ COD Available\n\n🛒 Order Now: https://wa.me/"+wa+"\n\n- Team "+_cn+" 🌾";
+    else if(t==="stock") msg = "📦 *New Stock Arrived at "+_cn+"!*\n\nFresh premium makhanas have just arrived:\n\n🌾 7 Suta Premium Makhana\n🌾 7 Suta Premium\n🌾 6 Suta Standard\n🌸 Kashmiri Kahwa\n\n🚚 Free delivery above ₹999\n📦 COD Available\n\n📞 Order: https://wa.me/"+wa+"\n- Team "+_cn;
+    else if(t==="festive") msg = "🪔 *"+_cn+" wishes you Happy Celebrations!*\n\nWarm wishes to you this festive season! 🎉\n\n🎁 Special Festival Offers:\n✅ Upto 25% off on all grades\n✅ Free delivery above ₹999\n\nOrder: https://wa.me/"+wa+"\n\n- Team "+_cn+" 🌾";
     document.getElementById("brcmMessage").value = msg;
 }
 function sendBRCM() {
@@ -12334,7 +12341,7 @@ async function openStockLedger() {
             ? entries.filter(e => e.productName.toLowerCase().includes(filter.toLowerCase()) || (e.source||'').toLowerCase().includes(filter.toLowerCase()))
             : entries;
         filtered = [...filtered].reverse(); // newest first
-        if(filtered.length === 0) return '<div style="text-align:center;color:#999;padding:2rem;font-size:0.85rem;">Koi movement log nahi hai abhi.<br><small>Stock adjust karne par automatically record hota hai.</small></div>';
+        if(filtered.length === 0) return '<div style="text-align:center;color:#999;padding:2rem;font-size:0.85rem;">No movement logs yet.<br><small>Records are created automatically when stock is adjusted.</small></div>';
         return filtered.map(e => {
             let color = e.type === 'deduct' ? '#ff4444' : e.type === 'set' ? '#1565c0' : '#d94030';
             let icon = e.type === 'deduct' ? '▼' : e.type === 'set' ? '◆' : '▲';
@@ -12483,7 +12490,7 @@ function openStockValuation() {
                 <div style="font-size:0.65rem;color:#555;">📋 Total Products</div>
             </div>
         </div>
-        <div style="font-size:0.65rem;color:#888;margin-bottom:0.5rem;">💡 Buy Rate purchase bills se auto-detect hota hai. Manually bhi update kar sakte ho purchase bills mein.</div>
+        <div style="font-size:0.65rem;color:#888;margin-bottom:0.5rem;">💡 Buy Rate is auto-detected from purchase bills. You can also update it manually in Purchase Bills.</div>
         <div style="overflow-x:auto;max-height:55vh;overflow-y:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:0.75rem;">
                 <thead style="position:sticky;top:0;background:#e3f2fd;">
@@ -13029,7 +13036,7 @@ function markBillPaid() {
         `<button onclick="_markBillPaidWith('${m}')" style="width:100%;background:#f0f7f4;color:#d94030;border:1.5px solid #d94030;padding:0.55rem;border-radius:10px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;">${['💵','📱','🏦','💳','📄'][i]} ${m}</button>`
     ).join('');
     overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:1.4rem 1.2rem;width:88%;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.22);">'
-        + '<div style="font-size:0.95rem;font-weight:700;color:#d94030;margin-bottom:0.9rem;">💳 Payment Method Select Karo</div>'
+        + '<div style="font-size:0.95rem;font-weight:700;color:#d94030;margin-bottom:0.9rem;">💳 Select Payment Method</div>'
         + btns
         + '<button onclick="document.getElementById(\'_payMethodModal\').remove()" style="width:100%;background:#eee;color:#333;border:none;padding:0.5rem;border-radius:10px;font-weight:600;font-size:0.85rem;cursor:pointer;margin-top:0.2rem;">Cancel</button>'
         + '</div>';
@@ -13710,7 +13717,7 @@ function importReplaceData() {
         // Step 1: Pehla click — warning
         let tok = Date.now().toString(36); // unique per session
         window._importReplaceToken = tok;
-        showToast('⚠️ Step 1/2: Sab data OVERWRITE ho jayega! Click again to confirm.', '#e53935');
+        showToast('⚠️ Step 1/2: This will OVERWRITE all data! Click again to confirm.', '#e53935');
         setTimeout(function(){ if(window._importReplaceToken===tok) window._importReplaceToken=null; }, 6000);
         return;
     }
@@ -14335,7 +14342,7 @@ function deleteSupplier(id) {
     let _supDelKey = '_delSup_' + id;
     if(!window[_supDelKey]) {
         window[_supDelKey] = true;
-        showToast('⚠️ Supplier delete karna hai? Click again to confirm.', '#ff9800');
+        showToast('⚠️ Delete this supplier? Click again to confirm.', '#ff9800');
         setTimeout(function(){ window[_supDelKey]=false; }, 4000);
         return;
     }
@@ -14722,7 +14729,7 @@ function pbPartialPay(id) {
     overlay.id = '_pbPayModal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;';
     overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:1.4rem 1.2rem;width:88%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.22);">'
-        + '<div style="font-size:1rem;font-weight:700;color:#d94030;margin-bottom:0.9rem;">💸 Partial Payment Record Karo</div>'
+        + '<div style="font-size:1rem;font-weight:700;color:#d94030;margin-bottom:0.9rem;">💸 Record Partial Payment</div>'
         + '<input id="_pbPayAmt" type="number" min="1" placeholder="Amount (₹)" style="width:100%;padding:0.6rem 0.8rem;border:1.5px solid #f4884a;border-radius:10px;font-size:1rem;margin-bottom:0.9rem;box-sizing:border-box;">'
         + '<div style="display:flex;gap:0.6rem;">'
         + '<button onclick="pbPartialPayConfirm(' + id + ')" style="flex:1;background:#d94030;color:white;border:none;padding:0.6rem;border-radius:10px;font-weight:700;font-size:0.9rem;cursor:pointer;">✅ Save</button>'
@@ -14853,7 +14860,7 @@ function wiInitDate() {
 // Load wholesale cart items into the invoice form
 function wiLoadFromCart() {
     let wsItems = cart.filter(i => i.isB2B);
-    if(!wsItems.length) { showToast('⚠️ Wholesale cart mein koi item nahi!', '#ff9800'); return; }
+    if(!wsItems.length) { showToast('⚠️ No items in wholesale cart!', '#ff9800'); return; }
     // Clear existing rows
     document.getElementById('wiItemsBody').innerHTML = '';
     wiRowCount = 0;
@@ -15518,7 +15525,7 @@ function wiLoadSaved() {
     let wiBills = _wiBills;
     let container = document.getElementById('wiSavedList');
     if(!container) return;
-    if(wiBills.length === 0) { container.innerHTML = '<div style="text-align:center;color:#999;padding:1rem;font-size:0.8rem;">— Koi saved invoice nahi —</div>'; return; }
+    if(wiBills.length === 0) { container.innerHTML = '<div style="text-align:center;color:#999;padding:1rem;font-size:0.8rem;">— No saved invoices —</div>'; return; }
     let html = wiBills.map(b => `
         <div style="display:flex;justify-content:space-between;align-items:center;background:white;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.4rem;border:1px solid #f0e8d8;font-size:0.78rem;">
             <div>
@@ -15552,7 +15559,7 @@ function wiDeleteBill(id) {
     let _wiDelKey = '_delWI_' + id;
     if(!window[_wiDelKey]) {
         window[_wiDelKey] = true;
-        showToast('⚠️ Invoice delete karna hai? Click again to confirm.', '#ff9800');
+        showToast('⚠️ Delete this invoice? Click again to confirm.', '#ff9800');
         setTimeout(function(){ window[_wiDelKey]=false; }, 4000);
         return;
     }
@@ -15824,11 +15831,11 @@ function khataLoadSummary() {
         const entries = khataGetEntries(c.id);
         return entries.some(e => (e.note||'').toLowerCase().includes(q));
     });
-    if(!filtered.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:1rem;">Koi customer nahi</td></tr>'; return; }
+    if(!filtered.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:1rem;">No customers found</td></tr>'; return; }
     tbody.innerHTML = filtered.map(c => {
         const b = khataBalance(c.id);
         const statusColor = b.net > 0 ? '#c62828' : b.net < 0 ? '#2e7d32' : '#555';
-        const statusText = b.net > 0 ? '🔴 Baaki Hai' : b.net < 0 ? '🟢 Advance Hai' : '✅ Clear';
+        const statusText = b.net > 0 ? '🔴 Outstanding' : b.net < 0 ? '🟢 Advance' : '✅ Clear';
         return `<tr>
             <td><strong>${esc(c.name||'')}</strong></td>
             <td>${esc(c.phone||'—')}</td>
@@ -15908,7 +15915,7 @@ function khataRenderLedger(cid) {
     document.getElementById('khataSumCredit').textContent = '₹' + totalCredit.toFixed(2);
     const net = totalDebit - totalCredit;
     const netEl = document.getElementById('khataSumNet');
-    netEl.textContent = '₹' + Math.abs(net).toFixed(2) + (net>0?' (Baaki)':net<0?' (Advance)':' (Clear)');
+    netEl.textContent = '₹' + Math.abs(net).toFixed(2) + (net>0?' (Outstanding)':net<0?' (Advance)':' (Clear)');
     netEl.style.color = net>0?'#c62828':net<0?'#2e7d32':'#555';
 }
 function khataClearSummary() {
@@ -15978,7 +15985,7 @@ window.khataDeleteEntry = function(cid, tsOrIdx) {
     let _kEntKey = '_delKEntry_' + cid + '_' + String(tsOrIdx);
     if(!window[_kEntKey]) {
         window[_kEntKey] = true;
-        showToast('⚠️ Entry delete karna hai? Click again to confirm.', '#ff9800');
+        showToast('⚠️ Delete this entry? Click again to confirm.', '#ff9800');
         setTimeout(function(){ window[_kEntKey]=false; }, 4000);
         return;
     }
@@ -16079,7 +16086,7 @@ window.khataPrintLedger = function() {
     <h2>📒 Khata Ledger — Makhan<span class="brand-az">az</span></h2>
     <h3>Customer: <strong>${escH(c?.name)}</strong> | Phone: ${escH(c?.phone)||'—'}</h3>
     <table><thead><tr><th>Date</th><th>Note</th><th>Debit (₹)</th><th>Credit (₹)</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>
-    <br><table><tr><td><strong>Total Debit:</strong> ₹${b.debit.toFixed(2)}</td><td><strong>Total Credit:</strong> ₹${b.credit.toFixed(2)}</td><td><strong>Net Balance:</strong> ₹${Math.abs(b.net).toFixed(2)} ${b.net>0?'(Baaki)':b.net<0?'(Advance)':'(Clear)'}</td></tr></table>
+    <br><table><tr><td><strong>Total Debit:</strong> ₹${b.debit.toFixed(2)}</td><td><strong>Total Credit:</strong> ₹${b.credit.toFixed(2)}</td><td><strong>Net Balance:</strong> ₹${Math.abs(b.net).toFixed(2)} ${b.net>0?'(Outstanding)':b.net<0?'(Advance)':'(Clear)'}</td></tr></table>
     <script>
 (function(){Object.keys(window).forEach(function(k){if(window[k]&&window[k]._s===1){try{delete window[k];}catch(e){}}});})();
 window.print();<\/script></body></html>`);
@@ -16101,7 +16108,7 @@ window.khataWhatsAppSummary = function() {
     const msg = `📒 *Makhanaz — Khata Summary*\n\n👤 *Customer:* ${c?.name||''}\n📞 *Phone:* ${c?.phone||'—'}\n\n💳 Total Debit: ₹${b.debit.toFixed(2)}\n💰 Total Credit: ₹${b.credit.toFixed(2)}\n📊 *Net Balance: ₹${Math.abs(b.net).toFixed(2)} ${b.net>0?'(Balance Due)':b.net<0?'(Advance Paid)':'(Account Settled)'}*\n\nFor any query: ${adminDisplay}`;
     const phone = c?.phone?.replace(/\D/g,'');
     if(!phone || phone.length < 10) {
-        showToast('⚠️ Customer ka phone number not available — WhatsApp nahi bhej sakte!', '#ff9800');
+        showToast('⚠️ Customer phone number not available — cannot send WhatsApp message!', '#ff9800');
         return;
     }
     // ✅ FIX L-1: Phone already normalized in khataAddCustomer, but safe-guard for old data
@@ -16844,7 +16851,7 @@ function loadAnalytics(days) {
     let topProds = Object.entries(prodMap).sort((a,b)=>b[1].rev-a[1].rev).slice(0,6);
     let tpEl = document.getElementById('analyticsTopProducts');
     if(tpEl) {
-        if(!topProds.length) { tpEl.innerHTML='<div style="color:#999;font-size:0.78rem;text-align:center;padding:0.5rem;">Is period mein koi orders nahi</div>'; }
+        if(!topProds.length) { tpEl.innerHTML='<div style="color:#999;font-size:0.78rem;text-align:center;padding:0.5rem;">No orders in this period</div>'; }
         else {
             let maxRev = topProds[0][1].rev || 1;
             tpEl.innerHTML = topProds.map(([name,data])=>{
@@ -17015,7 +17022,7 @@ function loadAdminReviews() {
             ['✅ Approved', approved, '#4caf50']
         ].map(([l,v,c])=>`<div class="analytics-mini-card"><div class="val" style="color:${c};">${v}</div><div class="lbl">${l}</div></div>`).join('');
     }
-    if(!filtered.length) { el.innerHTML='<div style="text-align:center;color:#999;padding:1rem;font-size:0.78rem;">Koi reviews nahi mile.</div>'; return; }
+    if(!filtered.length) { el.innerHTML='<div style="text-align:center;color:#999;padding:1rem;font-size:0.78rem;">No reviews found.</div>'; return; }
     el.innerHTML = filtered.map(r=>{
         let stars = '★'.repeat(r.rating)+'☆'.repeat(5-r.rating);
         let sc = r.status==='approved'?'#4caf50':r.status==='hidden'?'#999':'#ff9800';
@@ -17154,7 +17161,7 @@ function reviewAction(id, action) {
             showToast('🗑️ Review deleted!', '#ff9800');
         } else {
             window._deleteReviewPending = id;
-            showToast('⚠️ Review delete karna hai? Click again to confirm.', '#ff9800');
+            showToast('⚠️ Delete this review? Click again to confirm.', '#ff9800');
             setTimeout(function() { if(window._deleteReviewPending === id) window._deleteReviewPending = null; }, 4000);
         }
         return;
@@ -17189,7 +17196,7 @@ function renderHomepageReviews() {
     // Agar abhi tak koi approved review nahi hai, honest empty-state dikhao
     // (fake "4.8 ★ / 1000+ Happy Customers" hata diya).
     if(!reviews.length) {
-        grid.innerHTML = '<div id="noReviewsMsg" style="grid-column:1/-1;text-align:center;padding:2rem 1rem;color:#9a8f7f;font-size:0.85rem;">⭐ Abhi tak koi review nahi — pehla review aap dein!</div>';
+        grid.innerHTML = '<div id="noReviewsMsg" style="grid-column:1/-1;text-align:center;padding:2rem 1rem;color:#9a8f7f;font-size:0.85rem;">⭐ No reviews yet — be the first to write one!</div>';
         if(ratingEl) ratingEl.textContent = '— ★';
         if(countEl) countEl.textContent = 'No reviews yet';
         return;
@@ -17264,7 +17271,7 @@ function renderNotifPanel() {
     let el = document.getElementById('adminNotifList');
     if(!el) return;
     let notifs = getNotifs();
-    if(!notifs.length) { el.innerHTML='<div style="color:#999;text-align:center;padding:0.5rem;font-size:0.75rem;">Koi notifications nahi</div>'; return; }
+    if(!notifs.length) { el.innerHTML='<div style="color:#999;text-align:center;padding:0.5rem;font-size:0.75rem;">No notifications</div>'; return; }
     let icons = {order:'📦',payment:'💰',stock:'⚠️',review:'⭐',info:'ℹ️'};
     el.innerHTML = notifs.slice(0,20).map(n=>`
         <div style="display:flex;gap:0.5rem;padding:0.5rem 0;border-bottom:1px solid #f0ebe4;align-items:flex-start;">
@@ -17395,7 +17402,7 @@ function deleteAddress(i) {
     let _addrKey = '_delAddr_' + i;  // ✅ AUDIT FIX: idx → i (idx was undefined, caused ReferenceError)
     if(!window[_addrKey]) {
         window[_addrKey] = true;
-        showToast('⚠️ Address delete karna hai? Click again to confirm.', '#ff9800');
+        showToast('⚠️ Delete this address? Click again to confirm.', '#ff9800');
         setTimeout(function(){ window[_addrKey]=false; }, 4000);
         return;
     }
@@ -17439,10 +17446,10 @@ function shareReferCode() {
     let _dispPhn = _phn ? ('+91 ' + _phn.replace(/^91/, '')) : '';
     let _dispWeb = _web ? _web.replace(/^https?:\/\//, '') : '';
     let msg = (_cn ? '🌾 *' + _cn + '*\n\n' : '') +
-        'Mera refer code use karo: *' + code + '*\n\n' +
-        '✅ Pehle order par ₹50 discount milega!\n' +
-        (_dispWeb ? '🛒 Order karo: ' + _dispWeb + '\n' : '') +
-        (_dispPhn ? '📲 Ya WhatsApp: ' + _dispPhn : '');
+        'Use my referral code: *' + code + '*\n\n' +
+        '✅ Get ₹50 off on your first order!\n' +
+        (_dispWeb ? '🛒 Order here: ' + _dispWeb + '\n' : '') +
+        (_dispPhn ? '📲 Or WhatsApp us: ' + _dispPhn : '');
     window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
@@ -18089,7 +18096,7 @@ async function distRegister() {
     if (!name || !business || !phone || !email || !city || !state || !type || !pass) {
         showToast('⚠️ Sab required fields fill.', '#e67e22'); return;
     }
-    if (pass !== pass2) { showToast('❌ Passwords match nahi kar rahe.', '#c62828'); return; }
+    if (pass !== pass2) { showToast('❌ Passwords do not match.', '#c62828'); return; }
     if (pass.length < 6) { showToast('⚠️ Password must be at least 6 characters long.', '#e67e22'); return; }
     // ✅ FIX S-2: Email format validation (was missing, seller portal mein tha)
     if (!email.includes('@')) { showToast('❌ Valid email address dalein.', '#e67e22'); return; }
@@ -18361,7 +18368,7 @@ async function distChangePassword() {
     const newPass2 = document.getElementById('distChgNew2').value;
 
     if (!oldPass || !newPass || !newPass2) { showToast('⚠️ Sab fields fill.', '#e67e22'); return; }
-    if (newPass !== newPass2) { showToast('❌ New passwords match nahi kar rahe.', '#ff4444'); return; }
+    if (newPass !== newPass2) { showToast('❌ New passwords do not match.', '#ff4444'); return; }
     if (newPass.length < 6) { showToast('⚠️ Password must be at least 6 characters long.', '#e67e22'); return; }
 
     const oldHash = await distHash(oldPass);
@@ -19090,7 +19097,7 @@ async function distDeleteDoc(index) {
     let _docDelKey = '_delDoc_' + index;
     if(!window[_docDelKey]) {
         window[_docDelKey] = true;
-        showToast('⚠️ Document delete karna hai? Click again to confirm.', '#ff9800');
+        showToast('⚠️ Delete this document? Click again to confirm.', '#ff9800');
         setTimeout(function(){ window[_docDelKey]=false; }, 4000);
         return;
     }
@@ -19858,7 +19865,7 @@ function catEditRenderProducts() {
     if(!prods.length) {
         list.innerHTML = `<div style="text-align:center;padding:2rem;color:#999;">
             <div style="font-size:2.5rem;">📦</div>
-            <div style="margin-top:0.5rem;font-size:0.9rem;">Koi product nahi mila</div>
+            <div style="margin-top:0.5rem;font-size:0.9rem;">No products found</div>
             <div style="font-size:0.75rem;margin-top:0.3rem;">Is category mein products add here</div>
         </div>`;
         return;
@@ -20595,7 +20602,7 @@ function closeFkModal() {
         var prod = allProds.find(function(p) { return String(p.id) === String(productId); });
         if(!prod) { showToast('⚠️ Product not available', '#ff9800'); return; }
         // ✅ FIX M-3: inStock check — out-of-stock items cart mein nahi jayenge
-        if(prod.inStock === false || prod.stockQty === 0) { showToast('❌ Yeh product abhi out of stock hai!', '#ff4444'); return; }
+        if(prod.inStock === false || prod.stockQty === 0) { showToast('❌ This product is currently out of stock!', '#ff4444'); return; }
         if(typeof addToCart === 'function') {
             addToCart(prod.id, prod.name, prod.price || prod.basePrice || 0, false);
             showToast('✅ Added to cart successfully!', '#d94030');
@@ -20655,14 +20662,14 @@ function closeFkModal() {
         popup.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem;';
         popup.innerHTML = '<div style="background:white;border-radius:18px;padding:1.3rem;width:100%;max-width:380px;">' +
             '<h4 style="color:#c62828;margin-bottom:0.8rem;">❌ Cancel Request</h4>' +
-            '<p style="font-size:0.8rem;color:#555;margin-bottom:0.7rem;">Order #' + String(orderId).slice(-8) + ' cancel karna hai?</p>' +
+            '<p style="font-size:0.8rem;color:#555;margin-bottom:0.7rem;">Are you sure you want to cancel Order #' + String(orderId).slice(-8) + '?</p>' +
             '<select id="cancelReason" style="width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.82rem;margin-bottom:0.7rem;box-sizing:border-box;">' +
-                '<option value="">-- Reason select karein --</option>' +
-                '<option value="Changed my mind">Mera irada badal gaya</option>' +
-                '<option value="Wrong item ordered">Galat item order ho gaya</option>' +
-                '<option value="Duplicate order">Duplicate order hai</option>' +
-                '<option value="Delivery too late">Delivery bahut late ho rahi hai</option>' +
-                '<option value="Found better price">Better price mil gayi</option>' +
+                '<option value="">-- Select a reason --</option>' +
+                '<option value="Changed my mind">Changed my mind</option>' +
+                '<option value="Wrong item ordered">Wrong item ordered</option>' +
+                '<option value="Duplicate order">Duplicate order</option>' +
+                '<option value="Delivery too late">Delivery taking too long</option>' +
+                '<option value="Found better price">Found a better price elsewhere</option>' +
                 '<option value="Other">Other</option>' +
             '</select>' +
             '<textarea id="cancelNote" placeholder="Additional note (optional)" rows="2" style="width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.78rem;margin-bottom:0.7rem;resize:none;font-family:inherit;box-sizing:border-box;"></textarea>' +
@@ -20704,18 +20711,18 @@ function closeFkModal() {
     window.requestOrderReturn = function(orderId) {
         var order = (orders || []).find(function(o) { return String(o.id) === String(orderId); });
         if(!order) { showToast('❌ Order not found', '#ff4444'); return; }
-        if(order.status !== 'Delivered') { showToast('⚠️ Sirf delivered orders pe return request ho sakti hai', '#ff9800'); return; }
+        if(order.status !== 'Delivered') { showToast('⚠️ Return requests are only allowed for delivered orders', '#ff9800'); return; }
 
         var popup = document.createElement('div');
         popup.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem;';
         popup.innerHTML = '<div style="background:white;border-radius:18px;padding:1.3rem;width:100%;max-width:380px;">' +
             '<h4 style="color:#e65100;margin-bottom:0.8rem;">🔄 Return Request</h4>' +
-            '<p style="font-size:0.8rem;color:#555;margin-bottom:0.7rem;">Order #' + String(orderId).slice(-8) + ' return karna hai?</p>' +
+            '<p style="font-size:0.8rem;color:#555;margin-bottom:0.7rem;">Are you sure you want to return Order #' + String(orderId).slice(-8) + '?</p>' +
             '<select id="returnReason" style="width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.82rem;margin-bottom:0.7rem;box-sizing:border-box;">' +
                 '<option value="">-- Return reason --</option>' +
                 '<option value="Damaged product">Product damaged tha</option>' +
                 '<option value="Wrong product received">Galat product aaya</option>' +
-                '<option value="Quality not as expected">Quality expectations meet nahi ki</option>' +
+                '<option value="Quality not as expected">Quality did not meet expectations</option>' +
                 '<option value="Product expired">Product expired tha</option>' +
                 '<option value="Missing items">Items missing the</option>' +
                 '<option value="Other">Other</option>' +
