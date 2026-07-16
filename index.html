@@ -748,9 +748,13 @@ async function sbDeleteOrder(id) {
 // ✅ FIX 1: Bills → Supabase sync (localStorage-only data loss prevent karo)
 async function sbSaveBill(bill) {
     try {
+        // ✅ FIX ID-5: parseInt(bill.orderId) CRITICAL BUG — orderId ab UUID string hai (jaise "7c484c26-...").
+        // parseInt() sirf leading digits leta hai (parseInt("7c484c26...") = 7), aur 7 truthy hone ki wajah se
+        // '|| bill.orderId' fallback kabhi chalta hi nahi tha — galat order_id (sirf "7") DB mein save ho raha
+        // tha, jisse bills.find(b=>b.orderId===o.id) reload ke baad hamesha fail hota (Bill-Order link toot jaata).
         const row = {
             bill_no: bill.billNo,
-            order_id: typeof bill.orderId === 'number' ? bill.orderId : parseInt(bill.orderId) || bill.orderId,
+            order_id: bill.orderId,
             date: bill.date || new Date().toISOString(),
             customer_name: bill.customerName || '',
             customer_phone: bill.customerPhone || '',
@@ -771,8 +775,8 @@ async function sbSaveBill(bill) {
             customer_gstin: bill.customerGstin || '',
             customer_state: bill.customerState || ''
         };
-        // 🔒 FIX M-1: order_id coercion — SELECT aur UPDATE dono mein same coerced value use karo
-        const _coercedOId = typeof bill.orderId === 'number' ? bill.orderId : parseInt(bill.orderId) || bill.orderId;
+        // 🔒 FIX M-1 / ID-5: order_id ab UUID string hai — no coercion needed, seedha use karo
+        const _coercedOId = bill.orderId;
         const { data: existing, error: existErr } = await db.from('bills').select('id').eq('order_id', _coercedOId).maybeSingle();
         if (existing && !existErr) {
             await db.from('bills').update(row).eq('order_id', _coercedOId);
@@ -782,6 +786,62 @@ async function sbSaveBill(bill) {
         console.log('✅ Bill Supabase mein save ho gaya:', bill.billNo);
     } catch(e) {
         console.log('sbSaveBill error (bills table missing? RLS?):', e.message);
+    }
+}
+
+// ✅ FIX ID-5 REPAIR TOOL: Purane bills jinka order_id parseInt(UUID) bug se corrupt ho gaya tha
+// (jaise "7c484c26-..." → sirf "7" save ho gaya) unhe wapas sahi order se link karta hai.
+// Match customer_phone + total (exact) se hota hai — agar ek hi unique match milta hai toh auto-fix,
+// warna manual review ke liye report mein flag hota hai. Kabhi bhi data delete/overwrite nahi karta —
+// sirf bills.order_id column update karta hai.
+async function auditRepairBillLinks() {
+    if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
+    let reportEl = document.getElementById('billRepairReport');
+    if(reportEl) reportEl.textContent = '⏳ Scanning bills aur orders...';
+    try {
+        const [{ data: allBills, error: billErr }, { data: allOrders, error: ordErr }] = await Promise.all([
+            db.from('bills').select('*'),
+            db.from('orders').select('id,customer_phone,total,customer_name,date')
+        ]);
+        if(billErr) throw new Error('Bills fetch failed: ' + billErr.message);
+        if(ordErr) throw new Error('Orders fetch failed: ' + ordErr.message);
+        if(!allBills || !allOrders) { if(reportEl) reportEl.textContent = '❌ Data load fail — dobara try karo.'; return; }
+
+        let orderIdSet = new Set(allOrders.map(o => String(o.id)));
+        let fixed = [], ambiguous = [], noMatch = [];
+
+        for(let b of allBills) {
+            // Already correct — order_id kisi real order se match karta hai, skip
+            if(b.order_id && orderIdSet.has(String(b.order_id))) continue;
+
+            // Candidate orders: same phone + same total (exact)
+            let candidates = allOrders.filter(o =>
+                String(o.customer_phone||'') === String(b.customer_phone||'') &&
+                Number(o.total) === Number(b.total)
+            );
+
+            if(candidates.length === 1) {
+                let newOrderId = candidates[0].id;
+                await db.from('bills').update({ order_id: newOrderId }).eq('id', b.id);
+                fixed.push(b.bill_no + ' → ' + String(newOrderId).slice(-6));
+            } else if(candidates.length > 1) {
+                ambiguous.push(b.bill_no + ' (' + candidates.length + ' possible matches)');
+            } else {
+                noMatch.push(b.bill_no || ('bill#'+b.id));
+            }
+        }
+
+        let report = `✅ Fixed: ${fixed.length}\n⚠️ Ambiguous (manual check needed): ${ambiguous.length}\n❌ No match found: ${noMatch.length}\n\n`;
+        if(fixed.length) report += '✅ FIXED:\n' + fixed.join('\n') + '\n\n';
+        if(ambiguous.length) report += '⚠️ AMBIGUOUS (multiple orders with same phone+total — check manually):\n' + ambiguous.join('\n') + '\n\n';
+        if(noMatch.length) report += '❌ NO MATCH (order shayad delete ho chuka hai, ya phone/total mismatch):\n' + noMatch.join('\n');
+        if(reportEl) reportEl.textContent = report;
+        showToast(`🔧 Repair complete: ${fixed.length} fixed`, '#4caf50');
+        // Local bills array bhi refresh karo taaki UI turant update ho
+        if(typeof sbLoadBills === 'function') await sbLoadBills();
+    } catch(e) {
+        if(reportEl) reportEl.textContent = '❌ Error: ' + e.message;
+        showToast('❌ Repair failed: ' + e.message, '#ff4444');
     }
 }
 
@@ -5720,7 +5780,15 @@ body.dark-mode .nav-links { background: #1a0505 !important; }
 
 <div id="tab-settings" class="tab-content">
   <div style="max-width:500px;">
-    
+
+    <!-- ✅ FIX ID-5 repair tool: purane bills jinka order_id parseInt() bug se corrupt ho gaya tha unhe fix karo -->
+    <div style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #ffb74d;">
+      <h4 style="margin-bottom:0.5rem;color:#e65100;">🔧 Data Repair Tools</h4>
+      <p style="font-size:0.72rem;color:#795548;margin-bottom:0.7rem;">Purane bills jinka Order ID save karte waqt corrupt ho gaya tha (short number ki jagah asli UUID chahiye), unhe yahan se scan aur fix karo. Bills ko customer phone + total amount se match kiya jaata hai.</p>
+      <button onclick="auditRepairBillLinks()" style="background:#e65100;color:white;border:none;padding:0.55rem 1rem;border-radius:8px;font-size:0.8rem;font-weight:600;cursor:pointer;width:100%;">🔍 Scan &amp; Repair Bill-Order Links</button>
+      <div id="billRepairReport" style="margin-top:0.7rem;font-size:0.72rem;color:#5d4037;white-space:pre-wrap;"></div>
+    </div>
+
     <!-- ✅ Website Content Settings -->
     <div style="background:linear-gradient(135deg,#e3f2fd,#e8f5e9);border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #90caf9;">
       <h4 style="margin-bottom:0.8rem;color:#1565c0;">🌐 Website Content (Homepage)</h4>
@@ -7722,7 +7790,19 @@ function _renderSavedItems() {
         </div>`;
     }).join('');
 }
-function toggleCart() { document.getElementById('cartModal').classList.toggle('active'); renderCart(); }
+function toggleCart() {
+    // ✅ FIX MODAL-1: Agar UPI payment modal khula reh gaya tha (PhonePe/GPay se seedhe wapas aane par
+    // X button click nahi hota), toh wo cart ke upar stuck reh jaata tha — "View Cart" click karne pe
+    // seedha payment page dikhta tha. Ab cart open karte waqt UPI modal ko force-close kar rahe hain.
+    let _upiM = document.getElementById('upiPayModal');
+    if(_upiM && _upiM.style.display === 'block') {
+        _upiM.style.display = 'none';
+        window._upiOrderSaved = false;
+        window._upiSavedOrderId = null;
+    }
+    document.getElementById('cartModal').classList.toggle('active');
+    renderCart();
+}
 async function checkout() {
     if(cart.length === 0) { showToast('❌ Your cart is empty! Please add items first.', '#ff4444'); return; }
     if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
