@@ -35,6 +35,17 @@
 <!-- ✅ NO CDN — Native fetch() based Supabase client (file:// protocol compatible) -->
 <script>
 // ============================================================
+// ✅ FIX LOG-1: Production console.log suppression
+// 160+ debug console.log() calls poore file mein hain — production mein customer/competitor
+// ko internal debug info dikhna nahi chahiye. console.error/warn active rehte hain (real errors ke liye).
+// Testing ke waqt debug logs wapas chahiye ho toh URL mein ?debug=1 laga do.
+// ============================================================
+(function() {
+    if (!location.search.includes('debug=1')) {
+        console.log = function(){};
+    }
+})();
+// ============================================================
 // SUPABASE CONFIG
 // ============================================================
 const SUPABASE_URL = 'https://kwackgbsnonlkghqhqop.supabase.co';
@@ -620,7 +631,10 @@ async function sbSaveProduct(p) {
         if(row.image_value && row.image_value.length > 500000) {
             row.image_value = '🌾'; row.image_type = 'emoji';
         }
-        if(p.id && typeof p.id === 'number' && p.id > 0) {
+        // ✅ FIX ID-3: typeof p.id === 'number' fragile tha — Supabase bigint id ko kabhi JSON string bhi bhej sakta hai
+        // (JS number precision bachane ke liye). String id pe ye check hamesha false aata, product ko "naya" samajh
+        // ke duplicate row insert ho jaata — stock/edits purani row pe kabhi update nahi hote the.
+        if(p.id && Number(p.id) > 0) {
             const { data: existing } = await db.from('products').select('id').eq('id', p.id).maybeSingle(); // ✅ FIX BUG-P: .single() → .maybeSingle() — PGRST116 crash hota tha agar product Supabase mein na ho
             if(existing) {
                 await db.from('products').update(row).eq('id', p.id);
@@ -6177,7 +6191,8 @@ function saveProducts() {
     if(products && products.length > 0) {
         try {
             const rows = products.map(p => ({
-                ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                // ✅ FIX ID-3: typeof==='number' → Number()>0 — Supabase bigint id string bhi ho sakti hai
+                ...(p.id && Number(p.id) > 0 ? { id: Number(p.id) } : {}),
                 name: p.name,
                 price: p.price,
                 mrp: p.mrp || p.price,
@@ -6291,7 +6306,8 @@ function saveB2B() {
     if(b2bProducts && b2bProducts.length > 0) {
         try {
             const rows = b2bProducts.map(p => ({
-                ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                // ✅ FIX ID-3: typeof==='number' → Number()>0 — Supabase bigint id string bhi ho sakti hai
+                ...(p.id && Number(p.id) > 0 ? { id: Number(p.id) } : {}),
                 name: p.name,
                 price: p.price,
                 mrp: p.mrp || p.price,
@@ -7847,22 +7863,40 @@ function openUPIDirect() {
     let total = window._upiTotal || 0;
     let companyName = settings.companyName || '';
     let upiLink = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(companyName) + '&am=' + total + '&cu=INR';
-    window.open(upiLink, '_blank');
+    // ✅ FIX PAY-1: window.open('_blank') custom URI schemes (upi://) ke liye unreliable hai —
+    // kai Android WebViews mein ye blank tab khol deta hai ya OS intent ko galat referrer context
+    // ke saath trigger karta hai, jisse UPI app payment ko reject/fail kar deta hai.
+    // location.href = seedha current page se navigate/intent-trigger karta hai — zyada reliable.
+    window.location.href = upiLink;
     return false;
 }
 
 function copyUPIId() {
     let upiId = window._upiId || settings.upiId || '';
-    if(navigator.clipboard) {
-        navigator.clipboard.writeText(upiId).then(() => showToast('✅ UPI ID copied!', '#1565c0'));
+    // ✅ FIX COPY-1: navigator.clipboard.writeText() insecure context (content://, non-https) mein
+    // silently REJECT ho jaata hai — pehle koi .catch() nahi tha, isliye fallback kabhi chalta hi nahi tha
+    // aur button "kuch nahi karta" jaisa dikhta tha.
+    function _fallbackCopy() {
+        try {
+            let el = document.createElement('textarea');
+            el.value = upiId;
+            el.style.position = 'fixed';
+            el.style.opacity = '0';
+            document.body.appendChild(el);
+            el.focus();
+            el.select();
+            let ok = document.execCommand('copy');
+            document.body.removeChild(el);
+            if(ok) showToast('✅ UPI ID copied!', '#1565c0');
+            else showToast('⚠️ Copy failed — UPI ID: ' + upiId, '#ff9800');
+        } catch(e) {
+            showToast('⚠️ Copy failed — UPI ID: ' + upiId, '#ff9800');
+        }
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(upiId).then(() => showToast('✅ UPI ID copied!', '#1565c0')).catch(_fallbackCopy);
     } else {
-        let el = document.createElement('input');
-        el.value = upiId;
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand('copy');
-        document.body.removeChild(el);
-        showToast('✅ UPI ID copied!', '#1565c0');
+        _fallbackCopy();
     }
 }
 
@@ -7933,7 +7967,9 @@ async function sendPaymentScreenshotWhatsApp() {
 
     let orderId = window._upiSavedOrderId || '';
 
-    let orderLine = orderId ? '\nOrder ID: #' + orderId : '';
+    // ✅ FIX ID-4: Full UUID orderId customer ko unreadable lagta tha aur Bill No format (nexdr/2026/00001)
+    // se mismatch tha. Ab baaki app jaisa hi short readable ID (.slice(-6)) bhej rahe hain.
+    let orderLine = orderId ? '\nOrder ID: #' + String(orderId).slice(-6) : '';
     // ✅ FIX M-4: Delivery note UPI WA message mein add karo (COD flow mein tha, UPI mein missing tha)
     let _upiDnEl2 = document.getElementById('deliveryNoteInput');
     let upiDnLine = _upiDnEl2 && _upiDnEl2.value.trim() ? '\n📝 Note: ' + _upiDnEl2.value.trim() : '';
@@ -8236,7 +8272,7 @@ function loadDealershipList(filterStatus) {
                 </div>
             </div>
             <div style="margin-top:0.6rem;display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;">
-                <select onchange="updateDealerStatus(${e.id}, this.value)" style="flex:1;min-width:120px;padding:0.35rem 0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.72rem;background:white;">
+                <select onchange="updateDealerStatus('${e.id}', this.value)" style="flex:1;min-width:120px;padding:0.35rem 0.5rem;border:1px solid #ddd;border-radius:8px;font-size:0.72rem;background:white;">
                     <option value="New" ${stage==='New'?'selected':''}>🆕 New</option>
                     <option value="Contacted" ${stage==='Contacted'?'selected':''}>📞 Contacted</option>
                     <option value="Meeting Scheduled" ${stage==='Meeting Scheduled'?'selected':''}>📅 Meeting Scheduled</option>
@@ -8244,11 +8280,11 @@ function loadDealershipList(filterStatus) {
                     <option value="rejected" ${stage==='rejected'?'selected':''}>❌ Rejected</option>
                 </select>
                 <button onclick="waFollowUpDealer('${e.id}')" style="background:#25D366;color:white;border:none;padding:0.35rem 0.7rem;border-radius:8px;font-size:0.68rem;cursor:pointer;font-weight:600;">💬 WA</button>
-                <button onclick="deleteDealershipEnquiry(${e.id})" style="background:#ff525222;color:#ff5252;border:1px solid #ff5252;border-radius:8px;padding:0.35rem 0.6rem;font-size:0.68rem;cursor:pointer;">🗑️</button>
+                <button onclick="deleteDealershipEnquiry('${e.id}')" style="background:#ff525222;color:#ff5252;border:1px solid #ff5252;border-radius:8px;padding:0.35rem 0.6rem;font-size:0.68rem;cursor:pointer;">🗑️</button>
             </div>
             <div style="margin-top:0.5rem;display:flex;gap:0.4rem;">
                 <input type="text" id="dealNote_${e.id}" placeholder="Add follow-up note..." value="${esc(e.notes||'')}" style="flex:1;padding:0.35rem 0.6rem;border:1px solid #ddd;border-radius:8px;font-size:0.72rem;box-sizing:border-box;">
-                <button onclick="saveDealerNote(${e.id})" style="background:#d94030;color:white;border:none;padding:0.35rem 0.8rem;border-radius:8px;font-size:0.72rem;cursor:pointer;font-weight:700;">💾 Save</button>
+                <button onclick="saveDealerNote('${e.id}')" style="background:#d94030;color:white;border:none;padding:0.35rem 0.8rem;border-radius:8px;font-size:0.72rem;cursor:pointer;font-weight:700;">💾 Save</button>
             </div>
         </div>`;
     }).join('');
@@ -9003,7 +9039,7 @@ async function loadUserBills() {
         let dateStr = o.date ? new Date(o.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '';
         html += `<div style="background:#f9f9f9;border:1px solid #e0e0e0;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.3rem;">
             <div style="flex:1;min-width:0;">
-                <div style="font-weight:700;font-size:0.8rem;color:#d94030;">📦 Order #${o.id}</div>
+                <div style="font-weight:700;font-size:0.8rem;color:#d94030;">📦 Order #${String(o.id).slice(-6)}</div>
                 <div style="font-size:0.68rem;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${itemNames}</div>
                 <div style="font-size:0.7rem;color:#888;">${esc(dateStr)}</div>
                 <div style="font-size:0.75rem;"><span style="color:${statusColor};font-weight:600;">${esc(o.status||'Pending')}</span> · ₹${Number(o.total)||0}</div>
@@ -9943,25 +9979,25 @@ function loadAdminOrders() {
             <td style="font-size:0.72rem;">${o.items.map(i=>`${i.isWholesale?'<span style="font-size:0.58rem;color:#f4884a;">[W] </span>':''}${esc(i.name)} ×${Number(i.quantity)}`).join('<br>')}</td>
             <td style="font-weight:700;color:#f4884a;">₹${typeof o.total==="number"?o.total:String(o.total).replace(/[₹,]/g,"")}</td>
             <td>
-                <select onchange="updateStatus(${o.id},this.value)" style="padding:0.3rem;border:1px solid #ddd;border-radius:6px;font-size:0.7rem;background:${statusColor}22;color:${statusColor};font-weight:600;">
+                <select onchange="updateStatus('${o.id}',this.value)" style="padding:0.3rem;border:1px solid #ddd;border-radius:6px;font-size:0.7rem;background:${statusColor}22;color:${statusColor};font-weight:600;">
                     ${['Pending','Confirmed','Processing','Shipped','Delivered','Cancelled'].map(s=>`<option value="${s}" ${o.status===s?'selected':''}>${s}</option>`).join('')}
                 </select>
             </td>
-            <td><textarea onchange="saveOrderNote(${o.id},this.value)" style="width:110px;height:50px;font-size:0.65rem;border:1px solid #ddd;border-radius:6px;padding:3px;resize:none;" placeholder="Notes...">${esc(o.adminNote||'')}</textarea></td>
+            <td><textarea onchange="saveOrderNote('${o.id}',this.value)" style="width:110px;height:50px;font-size:0.65rem;border:1px solid #ddd;border-radius:6px;padding:3px;resize:none;" placeholder="Notes...">${esc(o.adminNote||'')}</textarea></td>
             <td style="font-size:0.65rem;color:#888;white-space:nowrap;">${esc((function(d){ if(!d) return ''; try { var p=new Date(d); return isNaN(p)?d:p.toLocaleString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); } catch(e){return d;} })(o.date))}</td>
             <td style="white-space:nowrap;">
-                <button onclick="openBillModal(${o.id})" style="background:#2196f3;color:white;border:none;padding:0.25rem 0.5rem;border-radius:5px;cursor:pointer;font-size:0.62rem;margin-bottom:3px;display:block;width:100%;">🧾 Bill</button>
-                ${o.paymentMethod && (o.paymentMethod.toLowerCase().includes('upi')||o.paymentMethod.toLowerCase().includes('online')) ? `<select onchange="updatePaymentStatus(${o.id},this.value)" style="padding:0.2rem;border:1px solid #ddd;border-radius:5px;font-size:0.6rem;margin-bottom:3px;width:100%;background:${(o.paymentStatus==='PAID'||o.paymentStatus==='Confirmed')?'#e8f5e9':(o.paymentStatus==='FAILED'||o.paymentStatus==='Rejected')?'#ffebee':(o.paymentStatus==='PAID_PENDING_VERIFY')?'#fff3e0':'#fff8e1'};">
+                <button onclick="openBillModal('${o.id}')" style="background:#2196f3;color:white;border:none;padding:0.25rem 0.5rem;border-radius:5px;cursor:pointer;font-size:0.62rem;margin-bottom:3px;display:block;width:100%;">🧾 Bill</button>
+                ${o.paymentMethod && (o.paymentMethod.toLowerCase().includes('upi')||o.paymentMethod.toLowerCase().includes('online')) ? `<select onchange="updatePaymentStatus('${o.id}',this.value)" style="padding:0.2rem;border:1px solid #ddd;border-radius:5px;font-size:0.6rem;margin-bottom:3px;width:100%;background:${(o.paymentStatus==='PAID'||o.paymentStatus==='Confirmed')?'#e8f5e9':(o.paymentStatus==='FAILED'||o.paymentStatus==='Rejected')?'#ffebee':(o.paymentStatus==='PAID_PENDING_VERIFY')?'#fff3e0':'#fff8e1'};">
                     <option value="PENDING" ${(!o.paymentStatus||o.paymentStatus==='PENDING')?'selected':''}>⏳ PENDING</option>
                     <option value="PAID_PENDING_VERIFY" ${o.paymentStatus==='PAID_PENDING_VERIFY'?'selected':''}>📸 VERIFY</option>
                     <option value="PAID" ${o.paymentStatus==='PAID'?'selected':''}>✅ PAID</option>
                     <option value="FAILED" ${o.paymentStatus==='FAILED'?'selected':''}>❌ FAILED</option>
-                </select>` : o.paymentMethod && o.paymentMethod.toLowerCase().includes('cod') ? `<select onchange="updatePaymentStatus(${o.id},this.value)" style="padding:0.2rem;border:1px solid #ddd;border-radius:5px;font-size:0.6rem;margin-bottom:3px;width:100%;background:${o.paymentStatus==='PAID'?'#e8f5e9':'#e3f2fd'};">
+                </select>` : o.paymentMethod && o.paymentMethod.toLowerCase().includes('cod') ? `<select onchange="updatePaymentStatus('${o.id}',this.value)" style="padding:0.2rem;border:1px solid #ddd;border-radius:5px;font-size:0.6rem;margin-bottom:3px;width:100%;background:${o.paymentStatus==='PAID'?'#e8f5e9':'#e3f2fd'};">
                     <option value="COD_PENDING" ${(!o.paymentStatus||o.paymentStatus==='COD_PENDING'||o.paymentStatus==='PENDING')?'selected':''}>💵 COD</option>
                     <option value="PAID" ${o.paymentStatus==='PAID'?'selected':''}>✅ PAID (Collected)</option>
                     <option value="FAILED" ${o.paymentStatus==='FAILED'?'selected':''}>❌ NOT PAID</option>
                 </select>` : `<span style="font-size:0.58rem;color:#888;display:block;text-align:center;padding:2px 0;">${o.paymentMethod||'COD'}</span>`}
-                <button class="delete-btn" onclick="deleteOrder(${o.id})" style="width:100%;">Del</button>
+                <button class="delete-btn" onclick="deleteOrder('${o.id}')" style="width:100%;">Del</button>
             </td>
         </tr>`;
     }
@@ -9977,6 +10013,10 @@ function updateStatus(id, status) {
     if(status === 'Confirmed' && prevStatus !== 'Confirmed') {
         // ✅ FIX M-4: saveOrders() redundant tha — sbSaveOrder already called at end of function
         showToast('✅ Order Confirmed! A WhatsApp message will be sent to the customer...', '#d94030');
+        // ✅ FIX POPUP-1: window.open() setTimeout ke andar late-call hone se browsers ise silently block kar dete the
+        // (popup ko "user gesture" se disconnected maan lete hain). Fix: blank tab abhi (click ke turant baad) khol do,
+        // uska URL baad mein set karo — isse popup-blocker isse trusted user-action samajhta hai.
+        let _waWinConf = window.open('', '_blank');
         setTimeout(() => {
             let phone = (o.customerPhone || '').replace(/\D/g,'');
             if(phone.length === 10) phone = '91' + phone;
@@ -9991,11 +10031,37 @@ function updateStatus(id, status) {
                     'It will be shipped soon. Tracking details will be shared on WhatsApp.\n' +
                     '━━━━━━━━━━━━━━━━━━━━\n' +
                     '📞 Support: +91 ' + (settings.whatsappNo || '').replace(/^91/,'') + ' | 🌐 ' + ((settings&&settings.companyWebsite) ? settings.companyWebsite : (settings&&settings.companyName||'Makhanaz'));
-                window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(confMsg), '_blank');
+                let confUrl = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(confMsg);
+                if(_waWinConf && !_waWinConf.closed) { _waWinConf.location.href = confUrl; } else { window.open(confUrl, '_blank'); }
+            } else if(_waWinConf && !_waWinConf.closed) {
+                _waWinConf.close();
             }
         }, 400);
     }
-    // Auto generate & send bill when order is Shipped
+    // ── AUTO WHATSAPP WHEN PROCESSING ──
+    if(status === 'Processing' && prevStatus !== 'Processing') {
+        showToast('⚙️ Order Processing! A WhatsApp message will be sent to the customer...', '#e65100');
+        let _waWinProc = window.open('', '_blank');
+        setTimeout(() => {
+            let phone = (o.customerPhone || '').replace(/\D/g,'');
+            if(phone.length === 10) phone = '91' + phone;
+            if(phone) {
+                let compName = settings.companyName || '';
+                let procMsg = '⚙️ *' + compName + ' - Order Processing!*\n━━━━━━━━━━━━━━━━━━━━\n' +
+                    '📋 *Order #' + String(o.id).slice(-6) + '*\n' +
+                    '👤 Customer: ' + o.customerName + '\n' +
+                    '💰 Total: ₹' + o.total + '\n' +
+                    '📦 Items: ' + o.items.map(i=>i.name+' x'+i.quantity).join(', ') + '\n\n' +
+                    '📦 *Your order is being packed and will be shipped soon!*\n' +
+                    '━━━━━━━━━━━━━━━━━━━━\n' +
+                    '📞 Support: +91 ' + (settings.whatsappNo || '').replace(/^91/,'') + ' | 🌐 ' + ((settings&&settings.companyWebsite) ? settings.companyWebsite : (settings&&settings.companyName||'Makhanaz'));
+                let procUrl = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(procMsg);
+                if(_waWinProc && !_waWinProc.closed) { _waWinProc.location.href = procUrl; } else { window.open(procUrl, '_blank'); }
+            } else if(_waWinProc && !_waWinProc.closed) {
+                _waWinProc.close();
+            }
+        }, 400);
+    }
     if(status === 'Shipped' && prevStatus !== 'Shipped') {
         let bill = generateBillData(o);
         saveBill(bill);
@@ -10034,6 +10100,8 @@ function updateStatus(id, status) {
         }
         showToast('🚚 Order Shipped! Bill generated!', '#2196f3');
         // ── AUTO SHIPPED WhatsApp MESSAGE TO CUSTOMER ──
+        // ✅ FIX POPUP-2: blank tab abhi khol do (user-gesture chain preserve), URL 400ms baad set karo
+        let _waWinShip = window.open('', '_blank');
         setTimeout(() => {
             let phone = (o.customerPhone || '').replace(/\D/g,'');
             if(phone.length === 10) phone = '91' + phone;
@@ -10051,7 +10119,10 @@ function updateStatus(id, status) {
                     '💰 Total: ₹' + o.total + '\n' +
                     '📞 Support: +91 ' + (settings.whatsappNo || '').replace(/^91/,'') + '\n' +
                     '🌐 ' + ((settings&&settings.companyWebsite) ? settings.companyWebsite : ((settings&&settings.companyName)||'Makhanaz'));
-                window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(shipMsg), '_blank');
+                let shipUrl = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(shipMsg);
+                if(_waWinShip && !_waWinShip.closed) { _waWinShip.location.href = shipUrl; } else { window.open(shipUrl, '_blank'); }
+            } else if(_waWinShip && !_waWinShip.closed) {
+                _waWinShip.close();
             }
         }, 400);
         setTimeout(() => {
@@ -10101,6 +10172,8 @@ function updateStatus(id, status) {
         }
         showToast('✅ Order Delivered!', '#4caf50');
         // Auto send delivery confirmation
+        // ✅ FIX POPUP-3: blank tab abhi khol do (user-gesture chain preserve), URL 400ms baad set karo
+        let _waWinDeliv = window.open('', '_blank');
         setTimeout(() => {
             let phone = (o.customerPhone || '').replace(/\D/g,'');
             if(phone.length === 10) phone = '91' + phone;
@@ -10113,7 +10186,10 @@ function updateStatus(id, status) {
                     '🔄 Return/Exchange: 7 days\n' +
                     '━━━━━━━━━━━━━━━━━━━━\n' +
                     '📞 Support: +91 ' + (settings.whatsappNo || '').replace(/^91/,'') + ' | 🌐 ' + ((settings&&settings.companyWebsite) ? settings.companyWebsite : (settings&&settings.companyName||'Makhanaz'));
-                window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(delivMsg), '_blank');
+                let delivUrl = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(delivMsg);
+                if(_waWinDeliv && !_waWinDeliv.closed) { _waWinDeliv.location.href = delivUrl; } else { window.open(delivUrl, '_blank'); }
+            } else if(_waWinDeliv && !_waWinDeliv.closed) {
+                _waWinDeliv.close();
             }
         }, 400);
     }
@@ -10524,13 +10600,13 @@ function loadBulkList() {
             </div>
             <div style="display:flex;gap:0.4rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center;">
                 <button onclick="waFollowUpBulk('${e.id}')" style="background:#25D366;color:white;border:none;padding:0.25rem 0.6rem;border-radius:8px;font-size:0.68rem;cursor:pointer;font-weight:600;">💬 WhatsApp</button>
-                <select onchange="updateBulkStatus(${e.id}, this.value)" style="padding:0.25rem 0.4rem;border:1px solid #ddd;border-radius:8px;font-size:0.68rem;">
+                <select onchange="updateBulkStatus('${e.id}', this.value)" style="padding:0.25rem 0.4rem;border:1px solid #ddd;border-radius:8px;font-size:0.68rem;">
                     <option ${e.status==='New'?'selected':''} value="New">🆕 New</option>
                     <option ${e.status==='Contacted'?'selected':''} value="Contacted">📞 Contacted</option>
                     <option ${e.status==='Interested'?'selected':''} value="Interested">✅ Interested</option>
                     <option ${e.status==='Closed'?'selected':''} value="Closed">❌ Closed</option>
                 </select>
-                <button onclick="deleteBulkEnquiry(${e.id})" style="background:#ff525222;color:#ff5252;border:1px solid #ff5252;border-radius:6px;padding:0.22rem 0.5rem;font-size:0.65rem;cursor:pointer;">🗑️</button>
+                <button onclick="deleteBulkEnquiry('${e.id}')" style="background:#ff525222;color:#ff5252;border:1px solid #ff5252;border-radius:6px;padding:0.22rem 0.5rem;font-size:0.65rem;cursor:pointer;">🗑️</button>
             </div>
         </div>`;
     }
@@ -13101,8 +13177,8 @@ function loadReports() {
                 '<div style="font-size:1rem;font-weight:800;color:#f4884a;">₹' + b.total + '</div>' +
                 '<span style="background:' + sc + '22;color:' + sc + ';padding:1px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">' + b.status + '</span>' +
                 '<div style="display:flex;gap:0.4rem;">' +
-                '<button onclick="openBillModal(' + b.orderId + ')" style="background:#d94030;color:white;border:none;padding:0.25rem 0.6rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">🧾 View</button>' +
-                '<button onclick="reSendBillWA(' + b.orderId + ')" style="background:#25D366;color:white;border:none;padding:0.25rem 0.6rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">📤 Send</button>' +
+                '<button onclick="openBillModal(\'' + b.orderId + '\')" style="background:#d94030;color:white;border:none;padding:0.25rem 0.6rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">🧾 View</button>' +
+                '<button onclick="reSendBillWA(\'' + b.orderId + '\')" style="background:#25D366;color:white;border:none;padding:0.25rem 0.6rem;border-radius:6px;font-size:0.65rem;cursor:pointer;">📤 Send</button>' +
                 '</div></div></div>';
         });
     }
@@ -13930,7 +14006,7 @@ function loadGSTReport() {
             let igst = isInter ? gstTotal : 0;
             let bill = bills.find(b => b.orderId === o.id); // ✅ FIX v36.19.2: localBills was undefined — must be bills
             let billNo = bill ? bill.billNo : 'INV-'+o.id;
-            rows.push({ no: billNo, customer: o.customerName||'-', date: o.date||'-', total, taxable, cgst, sgst, igst, gst: gstTotal, isInter, type: '🛒 Retail', viewFn: `openBillModal(${o.id})` });
+            rows.push({ no: billNo, customer: o.customerName||'-', date: o.date||'-', total, taxable, cgst, sgst, igst, gst: gstTotal, isInter, type: '🛒 Retail', viewFn: `openBillModal('${o.id}')` });
         });
     } else {
         // Wholesale: from nexdrop_wi_bills
@@ -14442,7 +14518,8 @@ function pbSaveBill() {
             if(updatedRetail.length > 0) {
                 try {
                     const rows = updatedRetail.map(p => ({
-                        ...(p.id && typeof p.id === 'number' && p.id > 0 ? { id: p.id } : {}),
+                        // ✅ FIX ID-3: typeof==='number' → Number()>0 — Supabase bigint id string bhi ho sakti hai
+                        ...(p.id && Number(p.id) > 0 ? { id: Number(p.id) } : {}),
                         name: p.name, price: p.price, mrp: p.mrp || p.price,
                         category: p.category, description: p.desc || p.description || '',
                         image_type: p.imageType,
@@ -18165,7 +18242,7 @@ async function openDistributorDashboard() {
         document.getElementById('distDashOrders').innerHTML = orders.map(o => `
             <div style="border:1px solid #eee;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.3rem;">
                 <div>
-                    <div style="font-weight:700;color:#d94030;font-size:0.85rem;">#${o.id} — ${esc(o.name || o.customer_name || 'Order')}</div>
+                    <div style="font-weight:700;color:#d94030;font-size:0.85rem;">#${String(o.id).slice(-6)} — ${esc(o.name || o.customer_name || 'Order')}</div>
                     <div style="font-size:0.72rem;color:#888;">${esc(String(o.date || o.created_at || ''))}</div>
                 </div>
                 <div style="text-align:right;">
@@ -18306,10 +18383,10 @@ function adminRenderDistributors() {
                 <span style="font-size:0.7rem;padding:3px 10px;border-radius:20px;font-weight:700;background:${(statusColor[d.status]||'#888')}22;color:${statusColor[d.status]||'#888'};border:1px solid ${statusColor[d.status]||'#888'};">${(d.status||'pending').toUpperCase()}</span>
             </div>
             <div style="display:flex;gap:0.4rem;margin-top:0.6rem;flex-wrap:wrap;">
-                ${d.status !== 'approved' ? `<button onclick="adminUpdateDistStatus(${d.id},'approved')" style="background:#27ae60;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">✅ Approve</button>` : ''}
-                ${d.status !== 'rejected' ? `<button onclick="adminUpdateDistStatus(${d.id},'rejected')" style="background:#e74c3c;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">❌ Reject</button>` : ''}
+                ${d.status !== 'approved' ? `<button onclick="adminUpdateDistStatus('${d.id}','approved')" style="background:#27ae60;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">✅ Approve</button>` : ''}
+                ${d.status !== 'rejected' ? `<button onclick="adminUpdateDistStatus('${d.id}','rejected')" style="background:#e74c3c;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">❌ Reject</button>` : ''}
                 <button onclick="adminDistWhatsApp('${esc(d.phone||'')}','${esc(d.name||'')}','${d.id}')" style="background:#25D366;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">💬 WhatsApp</button>
-                <button onclick="adminDeleteDistributor(${d.id})" style="background:#ff5252;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">🗑️ Delete</button>
+                <button onclick="adminDeleteDistributor('${d.id}')" style="background:#ff5252;color:white;border:none;padding:4px 10px;border-radius:8px;font-size:0.7rem;cursor:pointer;">🗑️ Delete</button>
             </div>
         </div>`).join('');
 }
@@ -18325,7 +18402,8 @@ async function adminUpdateDistStatus(id, status) {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;} // ✅ FIX v36.19.3
     try {
         await db.from('distributors').update({ status }).eq('id', id);
-        const d = _adminDistributors.find(x => x.id === id);
+        // ✅ FIX ID-2: String() coercion — id Supabase column type (number/UUID) chahe jo bhi ho, match ho jaaye
+        const d = _adminDistributors.find(x => String(x.id) === String(id));
         if (d) d.status = status;
         adminRenderDistributors();
         showToast(`✅ Status updated to ${status}`, '#d94030');
@@ -18345,7 +18423,8 @@ async function adminDeleteDistributor(id) {
     window[_distDelKey] = false;
     try {
         await db.from('distributors').delete().eq('id', id);
-        _adminDistributors = _adminDistributors.filter(x => x.id !== id);
+        // ✅ FIX ID-2: String() coercion — id Supabase column type (number/UUID) chahe jo bhi ho, match ho jaaye
+        _adminDistributors = _adminDistributors.filter(x => String(x.id) !== String(id));
         adminRenderDistributors();
         showToast('🗑️ Distributor deleted', '#e74c3c');
     } catch(e) { showToast('❌ Error: ' + e.message, '#ff4444'); }
@@ -18505,7 +18584,7 @@ function distRenderOrders(filter) {
         return `<div style="border:1px solid #eee;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;background:white;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                 <div style="flex:1;">
-                    <div style="font-weight:700;color:#d94030;font-size:0.88rem;">Order #${Number(o.id)}</div>
+                    <div style="font-weight:700;color:#d94030;font-size:0.88rem;">Order #${String(o.id).slice(-6)}</div>
                     <div style="font-size:0.72rem;color:#aaa;margin-top:2px;">📅 ${date}</div>
                     ${itemsHtml}
                 </div>
@@ -18981,7 +19060,7 @@ async function distLoadRecentOrders() {
             const col = statusColor[st] || '#888';
             return `<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #eee;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.4rem;">
                 <div>
-                    <div style="font-weight:700;color:#d94030;font-size:0.85rem;">Order #${o.id}</div>
+                    <div style="font-weight:700;color:#d94030;font-size:0.85rem;">Order #${String(o.id).slice(-6)}</div>
                     <div style="font-size:0.7rem;color:#aaa;">${(o.date||o.created_at||'').toString().slice(0,10)}</div>
                 </div>
                 <div style="text-align:right;">
