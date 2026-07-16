@@ -801,7 +801,7 @@ async function auditRepairBillLinks() {
     try {
         const [{ data: allBills, error: billErr }, { data: allOrders, error: ordErr }] = await Promise.all([
             db.from('bills').select('*'),
-            db.from('orders').select('id,customer_phone,total,customer_name,date')
+            db.from('orders').select('id,customer_phone,total,customer_name')
         ]);
         if(billErr) throw new Error('Bills fetch failed: ' + billErr.message);
         if(ordErr) throw new Error('Orders fetch failed: ' + ordErr.message);
