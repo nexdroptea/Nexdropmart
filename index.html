@@ -3972,15 +3972,15 @@ body.has-announcement #heroSlider { margin-top: 102px !important; }
         <span onclick="toggleEye('adminPass','adminPassEye')" id="adminPassEye" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
       </div>
       <div style="text-align:right;margin-bottom:1rem;">
-        <span onclick="showAdminForgot()" style="font-size:0.78rem;color:#00796b;cursor:pointer;text-decoration:underline;">Forgot Password?</span>
+        <span onclick="showAdminForgot()" style="font-size:0.78rem;color:#00796b;cursor:pointer;text-decoration:underline;">Change Password</span>
       </div>
       <button onclick="adminLogin()" style="width:100%;margin-bottom:0.5rem;">Login</button>
       <button onclick="closeAdminLogin()" style="width:100%;background:#eee;color:#333;">Close</button>
     </div>
     <!-- Forgot Password View -->
     <div id="adminForgotView" style="display:none;">
-      <h3 style="margin-bottom:0.4rem;">🔑 Reset Admin Password</h3>
-      <p style="font-size:0.78rem;color:#666;margin-bottom:1rem;">Verify current password and set a new one.</p>
+      <h3 style="margin-bottom:0.4rem;">🔑 Change Admin Password</h3>
+      <p style="font-size:0.78rem;color:#666;margin-bottom:1rem;">Know your current password? Verify it and set a new one below.<br><span style="color:#999;">Completely forgotten your password? This form can't help — ask whoever manages your database (Supabase) to reset it for you.</span></p>
       <input type="text" id="adminFpUser" placeholder="Username" style="margin-bottom:0.7rem;">
       <div style="position:relative;margin-bottom:0.7rem;">
         <input type="password" id="adminFpOld" placeholder="Current Password" style="width:100%;padding-right:2.8rem;box-sizing:border-box;">
@@ -3995,7 +3995,7 @@ body.has-announcement #heroSlider { margin-top: 102px !important; }
         <span onclick="toggleEye('adminFpConf','adminFpConfEye')" id="adminFpConfEye" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
       </div>
       <div id="adminFpMsg" style="font-size:0.78rem;min-height:1.2rem;margin-bottom:0.8rem;text-align:center;"></div>
-      <button onclick="adminResetPassword()" style="width:100%;margin-bottom:0.5rem;">🔒 Reset Password</button>
+      <button onclick="adminResetPassword()" style="width:100%;margin-bottom:0.5rem;">🔒 Change Password</button>
       <button onclick="showAdminLogin()" style="width:100%;background:#eee;color:#333;">← Back to Login</button>
     </div>
   </div>
@@ -9195,6 +9195,17 @@ async function adminResetPassword() {
     setMsg('⏳ Verifying...', '#888');
     try {
         const { data: adminCred, error } = await db.from('settings').select('value').eq('key','admin_credentials').maybeSingle(); // ✅ FIX: .single()→.maybeSingle() (row missing pe crash prevent)
+        // 🔒 FIX LOCKOUT-1: row missing ho toh default auto-seed karo (login flow jaisa) — reset
+        // form khud verify nahi kar payega kyunki koi baseline hi nahi hai, isliye seed karke user ko
+        // bata do login form se seedha default credentials se login karein.
+        if (!error && !adminCred) {
+            try {
+                const defaultCreds = { username: 'admin', password: 'NexDrop@2026' };
+                await db.from('settings').insert({ key: 'admin_credentials', value: JSON.stringify(defaultCreds) });
+            } catch(seedErr) { /* insert fail — normal flow continue karega */ }
+            setMsg('⚠️ Admin account nahi mila tha — default bana diya gaya hai. "Back to Login" pe jaake username: admin, password: NexDrop@2026 se login karein, phir Settings se naya password set karein.', '#e67e22');
+            return;
+        }
         if(error || !adminCred) { setMsg('❌ Server se connect nahi hua', '#c62828'); return; }
         let creds = typeof adminCred.value === 'string' ? JSON.parse(adminCred.value) : adminCred.value;
         if(u !== creds.username) { setMsg('❌ Username galat hai', '#c62828'); return; }
@@ -9265,11 +9276,28 @@ async function adminLogin() {
     // 🔒 Direct Supabase se verify karo — memory mein password nahi rakha jaata
     let verified = false;
     try {
-        const { data: adminCred, error } = await db
+        let { data: adminCred, error } = await db
             .from('settings')
             .select('value')
             .eq('key', 'admin_credentials')
             .maybeSingle(); // ✅ FIX BUG-A: .single() → .maybeSingle() — PGRST116 crash agar key missing ho
+
+        // 🔒 FIX LOCKOUT-1: Agar admin_credentials row hi missing hai (jaise Supabase data
+        // manually clear karne se), toh koi bhi login/reset kaam nahi karta tha — permanent lockout.
+        // Ab: agar row missing hai, ek default credential auto-create ho jaayega (username: admin,
+        // password: NexDrop@2026) taaki admin kabhi completely locked-out na ho. Login ke baad
+        // turant Settings se password change kar lena.
+        if (!error && !adminCred) {
+            try {
+                const defaultCreds = { username: 'admin', password: 'NexDrop@2026' };
+                await db.from('settings').insert({ key: 'admin_credentials', value: JSON.stringify(defaultCreds) });
+                showToast('⚠️ Admin credentials nahi mile the — default bana diye gaye: admin / NexDrop@2026. Turant Settings se password badal lein!', '#e67e22');
+                // ✅ Local variable turant update karo taaki agar user ne pehli baar hi sahi
+                // default credentials daale hain, toh isi attempt mein login ho jaaye (dobara click na karna pade)
+                adminCred = { value: JSON.stringify(defaultCreds) };
+            } catch(seedErr) { /* insert fail (RLS ya duplicate) — normal flow continue karega */ }
+        }
+
         if (!error && adminCred && adminCred.value) {
             let creds = typeof adminCred.value === 'string'
                 ? JSON.parse(adminCred.value)
@@ -14753,7 +14781,7 @@ function pbPartialPay(id) {
         + '<div style="font-size:1rem;font-weight:700;color:#00796b;margin-bottom:0.9rem;">💸 Record Partial Payment</div>'
         + '<input id="_pbPayAmt" type="number" min="1" placeholder="Amount (₹)" style="width:100%;padding:0.6rem 0.8rem;border:1.5px solid #f4884a;border-radius:10px;font-size:1rem;margin-bottom:0.9rem;box-sizing:border-box;">'
         + '<div style="display:flex;gap:0.6rem;">'
-        + '<button onclick="pbPartialPayConfirm(' + id + ')" style="flex:1;background:#00796b;color:white;border:none;padding:0.6rem;border-radius:10px;font-weight:700;font-size:0.9rem;cursor:pointer;">✅ Save</button>'
+        + '<button onclick="pbPartialPayConfirm(\'' + id + '\')" style="flex:1;background:#00796b;color:white;border:none;padding:0.6rem;border-radius:10px;font-weight:700;font-size:0.9rem;cursor:pointer;">✅ Save</button>'
         + '<button onclick="document.getElementById(\'_pbPayModal\').remove()" style="flex:1;background:#eee;color:#333;border:none;padding:0.6rem;border-radius:10px;font-weight:600;font-size:0.9rem;cursor:pointer;">Cancel</button>'
         + '</div></div>';
     document.body.appendChild(overlay);
